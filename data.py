@@ -386,19 +386,6 @@ def rescale_landmarks(landmarks,row_scale,col_scale):
     landmarks2 = landmarks2.reshape((1,-1))        
     return landmarks2
 
-def listdir_fullpath(d):
-        return [os.path.join(d, f) for f in os.listdir(d)]     
-
-def get_minorities(df,thresh=0.8):
-
-    c = df.iloc[:,1].value_counts()
-    lc = list(c)
-    max_count = lc[0]
-    diffs = [1-(x/max_count) for x in lc]
-    diffs = dict((k,v) for k,v in zip(c.keys(),diffs))
-    minorities = [c.keys()[x] for x,y in enumerate(lc) if y < (thresh*max_count)]
-    return minorities,diffs
-
 def csv_from_path(path):
 
     path = Path(path)

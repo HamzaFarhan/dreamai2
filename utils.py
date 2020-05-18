@@ -1,6 +1,6 @@
-from dreamai import pyflow
-from dreamai.dai_imports import*
-from dreamai.data_processing import get_img_stats
+from dreamai2 import pyflow
+from dreamai2.dai_imports import*
+from dreamai2.data import get_img_stats
 
 def save_obj(path, obj):
     with open(path, 'wb') as f:

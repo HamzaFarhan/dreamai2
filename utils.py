@@ -1,6 +1,4 @@
-from dreamai2 import pyflow
-from dreamai2.dai_imports import*
-from dreamai2.data import get_img_stats
+from .dai_imports import*
 
 def save_obj(path, obj):
     with open(path, 'wb') as f:
@@ -76,7 +74,10 @@ def img_int_to_float(img):
     return np.clip((np.array(img)/255).astype(np.float),0.,1.)
 
 def rgb_read(img):
-    return bgr2rgb(cv2.imread(img))
+    return bgr2rgb(cv2.imread(str(img)))
+
+def c1_read(img):
+    return cv2.imread(str(img), 0)
 
 def adjust_lightness(color, amount=1.2):
     color = img_int_to_float(color)
@@ -111,6 +112,23 @@ def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fi
     fig.savefig(fig_path)    
     plt.show()
     return fig
+
+def get_img_stats(dataset,channels):
+
+    print('Calculating mean and std of the data for standardization. Might take some time, depending on the training data size.')
+
+    imgs = []
+    for d in dataset:
+        img = d[0]
+        imgs.append(img)
+    imgs_ = torch.stack(imgs,dim=3)
+    imgs_ = imgs_.view(channels,-1)
+    imgs_mean = imgs_.mean(dim=1)
+    imgs_std = imgs_.std(dim=1)
+    del imgs
+    del imgs_
+    print('Done')
+    return imgs_mean,imgs_std
 
 def denorm_tensor(x,img_mean,img_std):
     if x.dim() == 3:
@@ -171,29 +189,6 @@ def one_hot(targets, multi=False):
         binerizer = LabelBinarizer()
         dai_1hot = binerizer.fit_transform(targets)
     return dai_1hot, binerizer.classes_
-
-def get_flow(im1, im2):
-
-    im1 = np.array(im1)
-    im2 = np.array(im2)
-    im1 = im1.astype(float) / 255.
-    im2 = im2.astype(float) / 255.
-    im1 = im1.copy(order='C')
-    im2 = im2.copy(order='C')
-    # print(im1.shape, im2.shape)
-    # Flow Options:
-    alpha = 0.012
-    ratio = 0.75
-    minWidth = 20
-    nOuterFPIterations = 7
-    nInnerFPIterations = 1
-    nSORIterations = 30
-    colType = 0  # 0 or default:RGB, 1:GRAY (but pass gray image with shape (h,w,1))
-    
-    u, v, im2W = pyflow.coarse2fine_flow(im1, im2, alpha, ratio, minWidth, nOuterFPIterations, nInnerFPIterations,nSORIterations, colType)
-    flow = np.concatenate((u[..., None], v[..., None]), axis=2)
-    #flow = rescale_flow(flow,0,1)
-    return flow
 
 def swap_state_dict_key(d, x, y):
     return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])

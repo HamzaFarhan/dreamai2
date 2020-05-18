@@ -1,9 +1,10 @@
-from . import utils
+from .core import*
+from .utils import*
 from .dai_imports import*
 
 class dai_classifier_dataset(Dataset):
     
-    def __init__(self, data, data_dir='', tfms=utils.instant_tfms(), channels=3):
+    def __init__(self, data, data_dir='', tfms=instant_tfms(), channels=3, **kwargs):
         super(dai_classifier_dataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
@@ -16,9 +17,9 @@ class dai_classifier_dataset(Dataset):
     def __getitem__(self, index):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
         if self.channels == 3:
-            img = utils.rgb_read(img_path)
+            img = rgb_read(img_path)
         else:    
-            img = utils.c1_read(img_path)
+            img = c1_read(img_path)
             
         y = self.data.iloc[index, 1]    
         x = self.tfms(image=img)['image']
@@ -27,27 +28,32 @@ class dai_classifier_dataset(Dataset):
 
         return (x,y,self.data.iloc[index, 0])
 
-def get_classifier_dls(df, data_dir='', tfms=utils.instant_tfms(224, 224),
+def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instant_tfms(224, 224),
                        bs=64, shuffle=True, pin_memory=True, num_workers=4,
-                       class_names=None, split=False, test_size=0.2, device='cpu'):
+                       class_names=None, split=True, val_size=0.2, test_size=0.15):
     
-    labels = utils.list_map(df.iloc[:,1], lambda x:str(x).split())
-    is_multi = np.array(utils.list_map(labels, lambda x:len(x)>1)).any()
+    labels = list_map(df.iloc[:,1], lambda x:str(x).split())
+    is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
     if class_names is None:
-        class_names = np.unique(utils.flatten_list(labels))
-    class_names = utils.list_map(class_names, str)
-    one_hot_labels = utils.dai_one_hot(labels, class_names)
+        class_names = np.unique(flatten_list(labels))
+    class_names = list_map(class_names, str)
+    one_hot_labels = dai_one_hot(labels, class_names)
     
     df['one_hot'] = list(one_hot_labels)
     cols = df.columns.to_list()
     df = df[[cols[0], cols[-1], *cols[1:-1]]]
     dfs = [df]
     if split:
-        dfs = utils.split_df(df, test_size, stratify_idx=2)
-    dsets = [dai_classifier_dataset(data_dir=data_dir, df=df, tfms=tfms) for df in dfs]
+        dfs = split_df(df, val_size, stratify_idx=2)
+        if test_size > 0:
+            val_df, test_df = split_df(dfs[1], test_size, stratify_idx=2)
+            dfs = [dfs[0], val_df, test_df]
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms) for df in dfs]
     dls = get_dls(dsets=dsets, bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     for dl in dls:
         dl.class_names = class_names
+        dl.is_multi = is_multi
+        dl.data_type = 'classification'
     return dls
 
 def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True):

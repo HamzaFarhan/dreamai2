@@ -15,6 +15,7 @@ from torchvision import datasets, models, transforms
 from torchvision.models.segmentation import deeplabv3_resnet50,deeplabv3_resnet101
 from torchvision.models import (vgg16,vgg16_bn,densenet121,resnet18,resnet34,resnet50,resnet101,resnet152,resnext50_32x4d,resnext101_32x8d)
 
+import re
 import io
 import os
 import cv2

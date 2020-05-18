@@ -1,5 +1,12 @@
 from .dai_imports import*
 
+image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.djvu','.erf','.gif','.ico',
+                    '.ief','.jng','.jp2','.jpe','.jpeg','.jpf','.jpg','.jpg2','.jpm','.jpx','.nef','.orf',
+                    '.pat','.pbm','.pcx','.pgm','.png','.pnm','.ppm','.psd','.ras','.rgb','.svg','.svgz',
+                    '.tif','.tiff','.wbmp','.xbm','.xpm','.xwd'}
+
+DEFAULTS = {'image_extensions': image_extensions}
+
 def save_obj(path, obj):
     with open(path, 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
@@ -190,7 +197,29 @@ def one_hot(targets, multi=False):
         dai_1hot = binerizer.fit_transform(targets)
     return dai_1hot, binerizer.classes_
 
-def swap_state_dict_key(d, x, y):
+def folders_to_df(path, imgs_repeat=False):
+
+    imgs = get_image_files(path)
+    data = {}
+    if not imgs_repeat:
+        for img in imgs:
+            n = img.name
+            p = img.parent.name
+            file_path = str(end_of_path(img))
+            data[file_path] = p
+    else:
+        for img in imgs:
+            n = img.name
+            p = img.parent.name
+            data[n] = data.get(n, '') + ' ' + p
+        data = {v.split()[0]+'/'+k: v for k, v in data.items()}
+    dd = {'imgs': list(data.keys()), 'labels': list(data.values())}
+    df = pd.DataFrame(dd, columns=['imgs', 'labels'])
+    return df
+
+def swap_dict_key(d, x, y, strict=False):
+    if strict:
+        return OrderedDict([(k.replace(x, y), v) if x == k else (k, v) for k, v in d.items()])    
     return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])
 
 def swap_state_dict_key_first(sd, x, y):
@@ -401,6 +430,15 @@ def remove_bn(s):
     for m in s.modules():
         if isinstance(m,nn.BatchNorm2d):
             m.eval()
+
+def is_pool_type(l): return re.search(r'Pool[123]d$', l.__class__.__name__)
+
+def has_pool_type(m):
+    "Return `True` if `m` is a pooling layer or has one in its children"
+    if is_pool_type(m): return True
+    for l in m.children():
+        if has_pool_type(l): return True
+    return False
 
 def dice(input, targs, iou = False, eps = 1e-8):
     "Dice coefficient metric for binary target. If iou=True, returns iou metric, classic for segmentation problems."
@@ -654,6 +692,38 @@ def chunkify(l, chunk_size):
 
 def idty(x):
     return x
+
+def setify(o): return o if isinstance(o,set) else set(list(o))
+
+def _get_files(p, fs, extensions=None):
+    p = Path(p)
+    res = [p/f for f in fs if not f.startswith('.')
+           and ((not extensions) or f'.{f.split(".")[-1].lower()}' in extensions)]
+    return res
+
+def get_files(path, extensions=None, recurse=True, folders=None, followlinks=True):
+    "Get all the files in `path` with optional `extensions`, optionally with `recurse`, only in `folders`, if specified."
+    if folders is None:
+        folders = list([])
+    path = Path(path)
+    extensions = setify(extensions)
+    extensions = {e.lower() for e in extensions}
+    if recurse:
+        res = []
+        for i,(p,d,f) in enumerate(os.walk(path, followlinks=followlinks)): # returns (dirpath, dirnames, filenames)
+            if len(folders) !=0 and i==0: d[:] = [o for o in d if o in folders]
+            else:                         d[:] = [o for o in d if not o.startswith('.')]
+            if len(folders) !=0 and i==0 and '.' not in folders: continue
+            res += _get_files(p, f, extensions)
+    else:
+        f = [o.name for o in os.scandir(path) if o.is_file()]
+        res = _get_files(path, f, extensions)
+    return list(res)
+
+def get_image_files(path, recurse=True, folders=None):
+    "Get image files in `path` recursively, only in `folders`, if specified."
+    return get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
+
 
 def last_modified(x):
     return x.stat().st_ctime

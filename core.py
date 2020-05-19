@@ -51,7 +51,7 @@ class AdaptiveConcatPool2d(nn.Module):
     def forward(self, x): return torch.cat([self.mp(x), self.ap(x)], 1)
 
 class Classifier():
-    def __init__(self,class_names):
+    def __init__(self, class_names):
         self.class_names = class_names
         self.class_correct = defaultdict(int)
         self.class_totals = defaultdict(int)

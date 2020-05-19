@@ -29,7 +29,7 @@ class dai_classifier_dataset(Dataset):
         return (x,y,self.data.iloc[index, 0])
 
 def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instant_tfms(224, 224),
-                       bs=64, shuffle=True, pin_memory=True, num_workers=4,
+                       bs=64, shuffle=True, pin_memory=False, num_workers=4,
                        class_names=None, split=True, val_size=0.2, test_size=0.15):
     
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
@@ -49,9 +49,12 @@ def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instan
             val_df, test_df = split_df(dfs[1], test_size, stratify_idx=2)
             dfs = [dfs[0], val_df, test_df]
     dsets = [dset(data_dir=data_dir, data=df, tfms=tfms) for df in dfs]
-    dls = get_dls(dsets=dsets, bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+    dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+    if split:
+        dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
     for dl in dls:
         dl.class_names = class_names
+        dl.num_classes = len(class_names)
         dl.is_multi = is_multi
         dl.data_type = 'classification'
     return dls

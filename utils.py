@@ -1,4 +1,4 @@
-from .dai_imports import*
+from .dai_imports import *
 
 image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.djvu','.erf','.gif','.ico',
                     '.ief','.jng','.jp2','.jpe','.jpeg','.jpf','.jpg','.jpg2','.jpm','.jpx','.nef','.orf',
@@ -231,6 +231,12 @@ def remove_key(d, x):
         if x in k:
             del d[k]
 
+def is_list(x):
+    return isinstance(x, list)
+
+def is_str(x):
+    return isinstance(x, str)
+
 def to_tensor(x):
     t = AT.ToTensor()
     if type(x) == list:
@@ -247,8 +253,9 @@ def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
     return tfms
 
 def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
-    t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0),
-          albu.RandomBrightnessContrast(0.1, 0.1), albu.ShiftScaleRotate(0.03,0,0)]
+    # t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0),
+    #       albu.RandomBrightnessContrast(0.1, 0.1), albu.ShiftScaleRotate(0.03,0,0)]
+    t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0), albu.ShiftScaleRotate(0.03,0,0)]
     t2 = list(instant_tfms(h, w, tensorfy, img_mean, img_std))
     return albu.Compose(t1+t2)
 
@@ -360,37 +367,7 @@ def mini_batch(dataset,bs,start=0):
         b = dataset[i]
         imgs[i-start] = b[0]
         labels[i-start] = tensor(b[1])
-    return imgs,labels    
-
-def get_optim(optimizer_name,params,lr):
-    if optimizer_name.lower() == 'adam':
-        return optim.Adam(params=params,lr=lr)
-    elif optimizer_name.lower() == 'sgd':
-        return optim.SGD(params=params,lr=lr)
-    elif optimizer_name.lower() == 'adadelta':
-        return optim.Adadelta(params=params)
-
-def unfreeze_model(model):
-    for param in model.parameters():
-        param.requires_grad = True
-
-def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1, relu=True, bn=True):
-    layers = [nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)]
-    if relu: layers.append(nn.ReLU(True))
-    if bn: layers.append(nn.BatchNorm2d(out_channels))
-    return nn.Sequential(*layers) 
-
-def cnn_input(o,k,s,p):
-    return ((o*s)-s)+k-(2*p) 
-
-def cnn_output(w,k,s,p):
-    return np.floor(((w-k+(2*p))/s))+1
-
-def cnn_stride(w,o,k,p):
-    return np.floor((w-k+(2*p))/(o-1))
-
-def cnn_padding(w,o,k,s):
-    return np.floor((((o*s)-s)-w+k)/2 )
+    return imgs,labels
 
 def pad_list(x, n):
     y = x
@@ -425,6 +402,9 @@ def psnr(mse):
 def get_psnr(inputs,targets):
     mse_loss = F.mse_loss(inputs,targets)
     return 10 * math.log10(1 / mse_loss)
+
+def bce_loss_func(out, targ):
+    return nn.BCEWithLogitsLoss()(out, targ.float())
 
 def remove_bn(s):
     for m in s.modules():
@@ -915,18 +895,3 @@ class MultiSeparateHeader(nn.Module):
         single_label = self.fc1(x)
         multi_label = self.fc2(x)
         return single_label,multi_label
-
-class Printer(nn.Module):
-    def forward(self,x):
-        print(x.size())
-        return x
-
-class Flatten(nn.Module):
-    def forward(self, input):
-        return input.view(input.size(0), -1)
-
-class SaveFeatures():
-    features=None
-    def __init__(self, m): self.hook = m.register_forward_hook(self.hook_fn)
-    def hook_fn(self, module, input, output): self.features = output
-    def remove(self): self.hook.remove()

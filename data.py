@@ -1,6 +1,53 @@
 from .utils import *
 from .dai_imports import *
 
+class DaiDataset(Dataset):
+    
+    def __init__(self, data, data_dir='', tfms=instant_tfms(), channels=3, **kwargs):
+        super(DaiDataset, self).__init__()
+        self.data_dir = data_dir
+        self.data = data
+        self.tfms = albu.Compose(tfms)
+        self.channels = channels
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
+        
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
+        if self.channels == 3:
+            img = rgb_read(img_path)
+        else:    
+            img = c1_read(img_path)
+            
+        y = self.data.iloc[index, 1]    
+        x = self.tfms(image=img)['image']
+        if self.channels == 1:
+            x = x.unsqueeze(0)
+        if is_str(y) and hasattr(self, 'class_names'):
+            y = self.class_names.index(y)
+        return x, y, self.data.iloc[index, 0]
+
+    def get_at_index(self, index, show=True):
+        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
+        if self.channels == 3:
+            img = rgb_read(img_path)
+        else:    
+            img = c1_read(img_path)
+            
+        y = self.data.iloc[index, 1]    
+        x = (self.tfms(image=img)['image'])
+        if self.channels == 1:
+            x = x.unsqueeze(0)
+        x = tensor_to_img(x)
+        p = self.data.iloc[index, 0]
+        if show:
+            print(f'path:{p}')
+            plt_show(x, title=y)
+        return x, y, p
+
 class dai_classifier_dataset(Dataset):
     
     def __init__(self, data, data_dir='', tfms=instant_tfms(), channels=3, class_names=[], **kwargs):

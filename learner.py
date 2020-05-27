@@ -25,6 +25,56 @@ class Callback():
     def after_epoch(self, obj): pass
     def after_fit(self, obj): pass
 
+class CheckpointCallback(Callback):
+    def __init__(self, metric='loss', curr_best=None, save_every=1, save_name='model_checkpoint', load_best=True):
+
+        self.load_best = load_best
+        self.save_metric = metric
+        self.save_every = save_every
+        if curr_best is None:
+            if metric == 'loss':
+                self.curr_best = 100.
+            else:
+                self.curr_best = 0.
+        else:
+            self.curr_best = curr_best
+        if save_name [-4:] != '.pth' or save_name [-4:] != '.pkl':
+            save_name = save_name+'.pth'
+        checkpoint_folder = 'dai_model_checkpoints'
+        os.makedirs(checkpoint_folder, exist_ok=True)
+        self.save_name = Path(checkpoint_folder)/save_name
+
+    def checker(self, curr, best, metric='loss'):
+        if metric == 'loss':
+            return curr <= best
+        return curr >= best
+
+    # def start_fit(self, obj):
+        # self.curr_best = None
+
+    def after_valid(self, obj):
+        if (obj.curr_epoch+1) % self.save_every == 0:
+            curr_metric = obj.val_ret[self.save_metric]
+            if self.checker(curr_metric, self.curr_best, self.save_metric):
+                top = f'\n**********Updating best {self.save_metric}**********\n'
+                print(top)
+                print(f'Previous best: {self.curr_best:.3f}')
+                print(f'New best: {curr_metric:.3f}\n')
+                bottom = '*'*(len(top)-1)
+                print(f'{bottom}\n')
+                self.curr_best = curr_metric
+                torch.save({'model': obj.model.state_dict(),
+                            'optimizer': obj.model.optimizer.state_dict(),
+                            self.save_metric: self.curr_best
+                            }, self.save_name)
+    
+    def after_fit(self, obj):
+        if self.save_name.exists() and self.load_best:
+            checkpoint = torch.load(self.save_name)
+            load_state_dict(obj.model, checkpoint['model'])
+            obj.model.optimizer.load_state_dict(checkpoint['optimizer'])
+            print('Best model loaded and model put in eval mode.')
+
 class BasicCallback(Callback):
     def __init__(self): pass
     
@@ -87,7 +137,7 @@ class BasicCallback(Callback):
         obj.val_ret = {}
         obj.val_ret['loss'] = obj.val_running_loss/len(obj.val_dl)
         if 'accuracy' in obj.fit_metric:
-            obj.val_ret['accuracy'], obj.val_ret['class_accuracies'] = obj.classifier.get_final_accuracies()
+            obj.val_ret[obj.fit_metric], obj.val_ret['class_accuracies'] = obj.classifier.get_final_accuracies()
     
     # def valid_progress(self, obj):
     #     time_elapsed = time.time() - obj.t2
@@ -119,7 +169,7 @@ class Learner():
     def __init__(self, model, dls, cbs=[BasicCallback()]):
         self.model = model
         self.dls = dls
-        self.cbs=cbs
+        self.cbs = cbs
         assert len(cbs) > 0, print('Please pass some callbacks for training.')
 
     def print_train_progress(self, progress={}):
@@ -141,7 +191,7 @@ class Learner():
             print('+----------------------------------------------------------------------+')
             print(f" {time.asctime().split()[-2]}")
             print(f" Time elapsed: {elapsed:.3f} {measure}")
-            print(f" Epoch:{self.curr_epoch}/{self.epochs-1}")
+            print(f" Epoch:{self.curr_epoch+1}/{self.epochs}")
             print(f" Batch: {self.tr_batches}/{len(self.tr_dl)}")
             print(f" Batch training time: {batch_time:.3f} {measure2}")
             print(f" Batch training loss: {self.tr_batch_loss:.3f}")
@@ -166,7 +216,7 @@ class Learner():
         
         print('\n'+'/'*36)
         print(f"{time.asctime().split()[-2]}")
-        print(f"Epoch {self.curr_epoch}/{self.epochs-1}")
+        print(f"Epoch {self.curr_epoch+1}/{self.epochs}")
         print(f"Validation time: {time_elapsed:.6f} {measure}")
 
         if len(tr_progress) > 0:
@@ -179,9 +229,10 @@ class Learner():
             for k in prog_keys:
                 v = val_progress[k]
                 if is_list(v):
-                    print(f"Epoch validation {k}:")
-                    for x in v:
-                        print(f'    {x}')
+                    if len(v) <= 5:
+                        print(f"Epoch validation {k}:")
+                        for x in v:
+                            print(f'    {x}')
                 else:
                     print(f"Epoch validation {k}: {v:.6}")
 
@@ -240,8 +291,8 @@ class Learner():
         self.fit_validate_every = validate_every
         
         cbs_event(self.cbs, self, 'start_fit')
-        for epoch in range(epochs):
-            
+
+        for epoch in range(epochs):    
             self.curr_epoch, self.epochs = epoch, epochs
             cbs_event(self.cbs, self, 'start_epoch')
             self.tr_ret = self.train_(dl=self.dls[0], opt=self.model.optimizer, print_every=print_every)

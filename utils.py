@@ -26,16 +26,17 @@ def display_img_actual_size(im_data, title=''):
     plt.title(title,fontdict={'fontsize':25})
     plt.show()
 
-def plt_show(im, cmap=None):
+def plt_show(im, cmap=None, title=''):
     if isinstance(im, torch.Tensor):
         im = tensor_to_img(im)
     plt.imshow(im, cmap=cmap)
+    plt.title(title)
     plt.show()
 
-def plt_load(path, show=False, cmap=None):
+def plt_load(path, show=False, cmap=None, title=''):
     img = plt.imread(path)
     if show:
-        plt_show(img, cmap=cmap)
+        plt_show(img, cmap=cmap, title=title)
     return img    
 
 def denorm_img_general(inp, mean=None, std=None):
@@ -242,6 +243,11 @@ def to_tensor(x):
     if type(x) == list:
         return [t(image=i)['image'] for i in x]
     return t(image=x)['image']
+
+def load_state_dict(model, sd, eval=True):
+    model.load_state_dict(sd)
+    if eval:
+        model.eval()
 
 def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
     normalize,t  = None, None

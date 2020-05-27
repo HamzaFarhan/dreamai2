@@ -244,6 +244,15 @@ def to_tensor(x):
         return [t(image=i)['image'] for i in x]
     return t(image=x)['image']
 
+def store_attr(self, nms):
+    "Store params named in comma-separated `nms` from calling context into attrs in `self`"
+    mod = inspect.currentframe().f_back.f_locals
+    for n in re.split(', *', nms): setattr(self,n,mod[n])
+
+def noop (x=None, *args, **kwargs):
+    "Do nothing"
+    return x
+
 def load_state_dict(model, sd, eval=True):
     model.load_state_dict(sd)
     if eval:
@@ -676,9 +685,6 @@ def show_landmarks(image, landmarks):
 def chunkify(l, chunk_size):
     return [l[i:i+chunk_size] for i in range(0,len(l), chunk_size)]
 
-def idty(x):
-    return x
-
 def setify(o): return o if isinstance(o,set) else set(list(o))
 
 def _get_files(p, fs, extensions=None):
@@ -720,7 +726,7 @@ def list_map(l, m):
 def p_list(path):
     return list(Path(path).iterdir())
 
-def path_list(path, suffix=None, make_str=False, map_fn=idty):
+def path_list(path, suffix=None, make_str=False, map_fn=noop):
     # if sort:
     #     if suffix is None:
     #         l = sorted(list(Path(path).iterdir()))
@@ -739,7 +745,7 @@ def path_list(path, suffix=None, make_str=False, map_fn=idty):
         l = list_map(l, str)
     return l
 
-def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=idty, reverse=False, only_dirs=False):
+def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=noop, reverse=False, only_dirs=False):
 
     if suffix is None:
         l = p_list(path)
@@ -759,7 +765,7 @@ def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=idty, rever
     return l
 
 def folders_with_files(p, full_path=False, folder_sort_key=None, file_sort_key=None, suffix=None, num_files=None,
-                       folder_key=lambda x:x, make_str=False, map_fn=idty, reverse=False):
+                       folder_key=lambda x:x, make_str=False, map_fn=noop, reverse=False):
     
     folders = sorted_paths(p, key=folder_sort_key, reverse=reverse, only_dirs=True)
     folders_dict = dict()

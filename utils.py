@@ -253,18 +253,51 @@ def noop (x=None, *args, **kwargs):
     "Do nothing"
     return x
 
-def load_state_dict(model, sd, eval=True):
-    model.load_state_dict(sd)
+def load_state_dict(model, sd, strict=True, eval=True):
+    model.load_state_dict(sd, strict=strict)
     if eval:
         model.eval()
 
-def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
+def set_lr(opt, lr):
+    opt.param_groups[0]['lr'] = lr
+
+def get_lr(opt):
+    return opt.param_groups[0]['lr']
+
+def get_optim(optimizer_name,params,lr):
+    if optimizer_name.lower() == 'adam':
+        return optim.Adam(params=params,lr=lr)
+    elif optimizer_name.lower() == 'sgd':
+        return optim.SGD(params=params,lr=lr)
+    elif optimizer_name.lower() == 'adadelta':
+        return optim.Adadelta(params=params)
+
+def freeze_params(params):
+    for p in params:
+        p.requires_grad = False
+
+def unfreeze_params(params):
+    for p in params:
+        p.requires_grad = True
+
+def freeze_model(model):
+    freeze_params(model.parameters())
+
+def unfreeze_model(model):
+    unfreeze_params(model.parameters())
+
+def params(m):
+    "Return all parameters of `m`"
+    return [p for p in m.parameters()]
+
+def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None, extra=[]):
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
         t = AT.ToTensor()
-    tfms = albu.Compose([albu.Resize(h, w), normalize, t])
+    tfms = extra+[albu.Resize(h, w), normalize, t]
+    tfms = albu.Compose(tfms)
     return tfms
 
 def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):

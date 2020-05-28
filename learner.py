@@ -20,33 +20,27 @@ class GetAttr:
 class Callback(GetAttr):
     _default = 'learner'
 
-    def start_fit(self): pass
+    def before_fit(self): pass
     
-    def start_epoch(self): pass
-    def start_training(self): pass
-    def on_train_loss(self): pass
-    def train_accum(self): pass
-    # def train_progress(self): self.print_train_progress({})
+    def before_training(self): pass
+    def before_train_epoch(self): pass
+    def after_train_epoch(self): pass
+    def before_train_batch(self): pass
     def after_train_batch(self): pass
-    def after_train_batches(self): pass
     def after_training(self): pass
     
-    def start_valid(self): pass
-    def start_valid_loop(self): pass
-    def valid_accum(self): pass
-    def after_valid_batch(self): pass
-    def update_valid_metrics(self): pass
-    def after_valid_loop(self): pass
-    # def valid_progress(self): self.print_valid_progress({})
+    def before_valid(self): pass
+    def before_val_epoch(self): pass
+    def after_val_epoch(self): pass
+    def before_val_batch(self): pass
+    def after_val_batch(self): pass
     def after_valid(self): pass
     
-    def after_epoch(self): pass
     def after_fit(self): pass
 
 class CheckpointCallback(Callback):
-    def __init__(self, metric='loss', curr_best=None, save_every=1, save_name='model_checkpoint', load_best=True):
+    def __init__(self, metric='loss', curr_best=None, save_every=1, save_name='model_checkpoint'):
 
-        self.load_best = load_best
         self.save_metric = metric
         self.save_every = save_every
         if curr_best is None:
@@ -67,7 +61,7 @@ class CheckpointCallback(Callback):
             return curr <= best
         return curr >= best
 
-    # def start_fit(self):
+    # def before_fit(self):
         # self.curr_best = None
 
     def after_valid(self):
@@ -78,7 +72,7 @@ class CheckpointCallback(Callback):
                 print(top)
                 print(f'Previous best: {self.curr_best:.3f}')
                 print(f'New best: {curr_metric:.3f}\n')
-                bottom = '*'*(len(top)-1)
+                bottom = '*'*(len(top)-2)
                 print(f'{bottom}\n')
                 self.curr_best = curr_metric
                 torch.save({'model': self.model.state_dict(),
@@ -94,130 +88,94 @@ class CheckpointCallback(Callback):
             print('Best model loaded and model put in eval mode.')
 
 class BasicCallback(Callback):
-    def __init__(self): pass
     
-    def start_training(self):
+    def before_fit(self):
+        self.learner.total_time = 0
+    
+    def before_training(self):
         self.learner.model.train()
         self.learner.t0 = time.time()
-        self.learner.t1 = time.time()
-        self.learner.tr_running_loss = 0.
-        self.learner.tr_batches = 0
-#         setattr(obj, 'tr_batches', 0)
-        
-    def train_accum(self):
-        self.learner.tr_running_loss += self.tr_batch_loss
     
-    # def train_progress(self):
-    #     if self.tr_batches % self.fit_print_every == 0:
-    #         elapsed = time.time()-self.t1
-    #         if elapsed > 60:
-    #             elapsed /= 60.
-    #             measure = 'min'
-    #         else:
-    #             measure = 'sec'
-    #         batch_time = time.time()-self.t0
-    #         if batch_time > 60:
-    #             batch_time /= 60.
-    #             measure2 = 'min'
-    #         else:
-    #             measure2 = 'sec'
-    #         self.learner.t0 = time.time()
-
-    #         print('+----------------------------------------------------------------------+\n'
-    #                 f"{time.asctime().split()[-2]}\n"
-    #                 f"Time elapsed: {elapsed:.3f} {measure}\n"
-    #                 f"Epoch:{self.curr_epoch}/{self.epochs-1}\n"
-    #                 f"Batch: {self.tr_batches}/{len(self.tr_dl)}\n"
-    #                 f"Batch training time: {batch_time:.3f} {measure2}\n"
-    #                 f"Batch training loss: {self.tr_batch_loss:.3f}\n"
-    #                 f"Average training loss: {self.tr_running_loss/(self.tr_batches):.3f}\n"
-    #               '+----------------------------------------------------------------------+\n'     
-    #             )
-
-    def after_train_batches(self):
+    def before_train_epoch(self):
+        self.learner.tr_running_loss = 0.
+    
+    def before_train_batch(self):
+        self.learner.t1 = time.time()
+    
+    def after_train_batch(self):
+        self.learner.tr_running_loss += self.tr_batch_loss    
+    
+    def after_train_epoch(self):
         self.learner.tr_ret = {}
-        self.learner.tr_ret['loss'] = self.tr_running_loss/len(self.tr_dl)
+        self.learner.tr_ret['loss'] = self.tr_running_loss/self.num_batches        
         
-    def start_valid(self):
+    def before_valid(self):
         self.learner.model.eval()
         self.learner.t2 = time.time()
         
-    def start_valid_loop(self):
+    def before_val_epoch(self):
         self.learner.val_running_loss = 0.
         self.learner.classifier = None
         if 'accuracy' in self.fit_metric:
-            self.learner.classifier = Classifier(self.dls[1].class_names)
-
-    def valid_accum(self):
+            self.learner.classifier = Classifier(self.dls.class_names)
+    
+    def after_val_batch(self):
         self.learner.val_running_loss += self.val_batch_loss
     
-    def update_valid_metrics(self):
+    def after_val_epoch(self):
         self.learner.val_ret = {}
-        self.learner.val_ret['loss'] = self.val_running_loss/len(self.val_dl)
+        self.learner.val_ret['loss'] = self.val_running_loss/self.num_batches
         if 'accuracy' in self.fit_metric:
-            self.learner.val_ret[self.fit_metric], self.learner.val_ret['class_accuracies'] = self.classifier.get_final_accuracies()
-    
-    # def valid_progress(self):
-    #     time_elapsed = time.time() - self.t2
-    #     if time_elapsed > 60:
-    #         time_elapsed /= 60.
-    #         measure = 'min'
-    #     else:
-    #         measure = 'sec'
-        
-    #     print('\n'+'/'*36+'\n'
-    #             f"{time.asctime().split()[-2]}\n"
-    #             f"Epoch {self.curr_epoch}/{self.epochs-1}\n"    
-    #             f"Validation time: {time_elapsed:.6f} {measure}\n"    
-    #             f"Epoch training loss: {self.tr_ret['loss']:.6f}\n"                        
-    #             f"Epoch validation loss: {self.val_ret['loss']:.6f}")
-    #     print('\\'*36+'\n')
+            self.learner.val_ret[self.fit_metric],\
+            self.learner.val_ret['class_accuracies'] = self.classifier.get_final_accuracies()
 
     def after_valid(self):
         self.learner.model.train()
-    
-    def after_fit(self):
-        torch.cuda.empty_cache()
 
-def cbs_event(cbs, event):
-    for cb in cbs:
-        getattr(cb, event)()
+class Learner:
+    def __init__(self, model, dls, model_splitter=None, cbs=[BasicCallback()]):
 
-class Learner():
-    def __init__(self, model, dls, cbs=[BasicCallback()]):
-
-        store_attr(self, 'model,dls,cbs')
+        store_attr(self, 'model,dls,model_splitter,cbs')
         for cb in cbs: cb.learner = self
-
         assert len(cbs) > 0, print('Please pass some callbacks for training.')
-
-    def __call__(self,name):
-        for cb in self.cbs: getattr(cb,name,noop)()
-
+    
     def print_train_progress(self, progress={}):
-        if self.tr_batches % self.fit_print_every == 0:
-            elapsed = time.time()-self.t1
+        
+        if (self.batch_num+1) % self.fit_print_every == 0:
+            elapsed = time.time()-self.t0
             if elapsed > 60:
                 elapsed /= 60.
                 measure = 'min'
             else:
                 measure = 'sec'
-            batch_time = time.time()-self.t0
+            batch_time = time.time()-self.t1
+
+            if self.total_time == 0:
+                total_time = (batch_time*self.num_batches*self.fit_epochs) + (self.fit_epochs/self.fit_validate_every)
+                if total_time > 60:
+                    total_time /= 60.
+                    total_measure = 'min'
+                else:
+                    total_measure = 'sec'
+                self.total_time = total_time
+                self.total_measure = total_measure
+            total_time, total_measure = self.total_time, self.total_measure                
+
             if batch_time > 60:
                 batch_time /= 60.
                 measure2 = 'min'
             else:
                 measure2 = 'sec'
-            self.t0 = time.time()
+            self.t1 = time.time()
 
             print('+----------------------------------------------------------------------+')
             print(f" {time.asctime().split()[-2]}")
-            print(f" Time elapsed: {elapsed:.3f} {measure}")
-            print(f" Epoch:{self.curr_epoch+1}/{self.epochs}")
-            print(f" Batch: {self.tr_batches}/{len(self.tr_dl)}")
+            print(f" Time elapsed: {elapsed:.3f}{measure} / {total_time:.3f}{total_measure}")
+            print(f" Epoch:{self.curr_epoch+1}/{self.fit_epochs}")
+            print(f" Batch: {self.batch_num+1}/{self.num_batches}")
             print(f" Batch training time: {batch_time:.3f} {measure2}")
             print(f" Batch training loss: {self.tr_batch_loss:.3f}")
-            print(f" Average training loss: {self.tr_running_loss/(self.tr_batches):.3f}")
+            print(f" Average training loss: {self.tr_running_loss/(self.batch_num+1):.3f}")
             if len(progress) > 0:
                 prog_keys = list(progress.keys())
                 for k in prog_keys[:-1]:
@@ -238,7 +196,7 @@ class Learner():
         
         print('\n'+'/'*36)
         print(f"{time.asctime().split()[-2]}")
-        print(f"Epoch {self.curr_epoch+1}/{self.epochs}")
+        print(f"Epoch {self.curr_epoch+1}/{self.fit_epochs}")
         print(f"Validation time: {time_elapsed:.6f} {measure}")
 
         if len(tr_progress) > 0:
@@ -259,70 +217,151 @@ class Learner():
                     print(f"Epoch validation {k}: {v:.6}")
 
         print('\\'*36+'\n')
-
-    def train_(self, dl, opt, print_every=3):
-        
-        self.tr_dl = dl
-        self.tr_opt = opt
-        self.tr_print_every = print_every
-        
-        self('start_training')
-        
-        for data_batch in dl:
-            self.tr_batches += 1
-            self.tr_batch_loss = self.model.batch_to_loss(data_batch)[0]
-            
-            self('on_train_loss')
-            self('train_accum')
+    
+    def train_batch(self):
+        self('before_train_batch')
+        self.tr_batch_loss = self.model.batch_to_loss(self.data_batch)[0]
+        self('after_train_batch')
+    
+    def val_batch(self):
+        self('before_val_batch')
+        self.val_batch_loss = self.model.val_batch_to_loss(self.data_batch, metric=self.fit_metric,
+                                                           classifier=self.classifier)[0]
+        self('after_val_batch')
+    
+    def train_epoch(self):
+        self('before_train_epoch')
+        dl = self.dls.train
+        self.num_batches = len(dl)
+        for self.batch_num, self.data_batch in enumerate(dl):
+            self.train_batch()
             self.print_train_progress()
-            # self('train_progress')         
-            self('after_train_batch')
-            
-        self('after_train_batches')
-        return self.tr_ret
+        self('after_train_epoch')
     
-    def validate(self, dl):
-        
-        self.val_dl = dl
-        self('start_valid')   
-        
-        self.validation_loop(dl)
-        self('after_valid_loop')
+    def val_epoch(self):
+        self('before_val_epoch')
+        dl = self.dls.valid
+        self.num_batches = len(dl)
+        with torch.no_grad():
+            for self.batch_num, self.data_batch in enumerate(dl):
+                self.val_batch()
+        self('after_val_epoch')
         self.print_valid_progress()
-        # self('valid_progress') 
-        return self.val_ret
     
-    def validation_loop(self, dl):
+    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True):
         
-        self('start_valid_loop')
-        
-        for data_batch in dl:
-                
-            self.val_batch_loss, self.val_batch_outputs = self.model.val_batch_to_loss(data_batch,
-                                                          metric=self.fit_metric, classifier=self.classifier)
-            
-            self('valid_accum')
-            self('after_valid_batch')
-            
-        self('update_valid_metrics')
-    
-    def fit(self, epochs, metric='loss', print_every=3, validate_every=1):
         self.fit_epochs = epochs
         self.fit_metric = metric
         self.fit_print_every = print_every
         self.fit_validate_every = validate_every
+        self.load_best = load_best
         
-        self('start_fit')
+        if lr:
+            set_lr(self.model.optimizer, lr)
 
-        for epoch in range(epochs):    
-            self.curr_epoch, self.epochs = epoch, epochs
-            self('start_epoch')
-            self.tr_ret = self.train_(dl=self.dls[0], opt=self.model.optimizer, print_every=print_every)
+        self('before_fit')
+        for self.curr_epoch in range(epochs):
+            
+            self('before_training')
+            self.train_epoch()
             self('after_training')
             
-            if validate_every and (epoch % validate_every == 0):            
-                self.val_ret = self.validate(dl=self.dls[1])
-                self('after_valid')
-            self('after_epoch')
-            
+            if validate_every and (self.curr_epoch % validate_every == 0):
+                self('before_valid')
+                self.val_epoch()
+                self('after_valid')                
         self('after_fit')
+    
+    def freeze(self):
+        if self.model_splitter:
+            freeze_params(params(self.model))
+            p1,p2 = self.model_splitter(self.model)
+            # freeze_params(p1)
+            unfreeze_params(p2)
+        
+        else:
+            self.model.freeze()
+    
+    def unfreeze(self):
+        self.model.unfreeze()
+        # unfreeze_params(self.model.parameters())
+
+
+    def fine_tune(self, frozen_epochs=2, unfrozen_epochs=5, frozen_lr=0.001, unfrozen_lr=0.001,
+                  metric='loss', load_best_frozen=False):
+
+        print(f'+{"-"*10}+')
+        print(f'+  FROZEN  +')
+        print(f'+{"-"*10}+')
+        self.freeze()
+        self.fit(frozen_epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen)
+        print()
+        print(f'+{"-"*10}+')
+        print(f'+ UNFROZEN +')
+        print(f'+{"-"*10}+')
+        self.unfreeze()
+        self.fit(unfrozen_epochs, lr=unfrozen_lr, metric=metric, load_best=True)
+
+    def find_lr(self, dl=None, init_value=1e-8, final_value=10., beta=0.98, plot=False):
+
+        print('\nFinding the ideal learning rate.')
+
+        model_state = copy.deepcopy(self.model.state_dict())
+        optim_state = copy.deepcopy(self.model.optimizer.state_dict())
+        optimizer = self.model.optimizer
+        if dl is None:
+            dl = self.dls.train
+        num = len(dl)-1
+        mult = (final_value / init_value) ** (1/num)
+        lr = init_value
+        set_lr(optimizer, lr)
+        avg_loss = 0.
+        best_loss = 0.
+        batch_num = 0
+        losses = []
+        log_lrs = []
+        for data_batch in dl:
+            batch_num += 1
+            loss = self.model.batch_to_loss(data_batch)[0]
+            #Compute the smoothed loss
+            avg_loss = beta * avg_loss + (1-beta) * loss
+            smoothed_loss = avg_loss / (1 - beta**batch_num)
+            #Stop if the loss is exploding
+            if batch_num > 1 and smoothed_loss > 4 * best_loss:
+                self.log_lrs, self.find_lr_losses = log_lrs,losses
+                self.model.load_state_dict(model_state)
+                self.model.optimizer.load_state_dict(optim_state)
+                if plot:
+                    self.plot_find_lr()
+                temp_lr = self.log_lrs[np.argmin(self.find_lr_losses)-(len(self.log_lrs)//7)]
+                self.lr = (10**temp_lr)
+                print('Found it: {}\n'.format(self.lr))
+                return self.lr
+            #Record the best loss
+            if smoothed_loss < best_loss or batch_num==1:
+                best_loss = smoothed_loss
+            #Store the values
+            losses.append(smoothed_loss)
+            log_lrs.append(math.log10(lr))
+            #Update the lr for the next step
+            lr *= mult
+            set_lr(optimizer, lr)
+
+        self.log_lrs, self.find_lr_losses = log_lrs,losses
+        self.model.load_state_dict(model_state)
+        self.model.optimizer.load_state_dict(optim_state)
+        if plot:
+            self.plot_find_lr()
+        temp_lr = self.log_lrs[np.argmin(self.find_lr_losses)-(len(self.log_lrs)//10)]
+        self.lr = (10**temp_lr)
+        print('Found it: {}\n'.format(self.lr))
+        return self.lr
+            
+    def plot_find_lr(self):    
+        plt.ylabel("Loss")
+        plt.xlabel("Learning Rate (log scale)")
+        plt.plot(self.log_lrs,self.find_lr_losses)
+        plt.show()
+
+    def __call__(self,name):
+        for cb in self.cbs: getattr(cb,name,noop)()

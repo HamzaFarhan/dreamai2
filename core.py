@@ -6,7 +6,7 @@ models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
                resnet50: {'cut': -2, 'conv_channels': 2048},
                densenet121: {'cut': -1, 'conv_channels': 1024}}
 
-DEFAULTS = {'models_meta': models_meta}
+DEFAULTS = {'models_meta': models_meta, 'metrics': ['loss', 'accuracy', 'multi_accuracy']}
 
 def create_body(arch, pretrained=True, cut=None, num_extra=3):
     model = arch(pretrained=pretrained)
@@ -75,28 +75,6 @@ class SaveFeatures():
     def __init__(self, m): self.hook = m.register_forward_hook(self.hook_fn)
     def hook_fn(self, module, input, output): self.features = output
     def remove(self): self.hook.remove()
-
-def get_optim(optimizer_name,params,lr):
-    if optimizer_name.lower() == 'adam':
-        return optim.Adam(params=params,lr=lr)
-    elif optimizer_name.lower() == 'sgd':
-        return optim.SGD(params=params,lr=lr)
-    elif optimizer_name.lower() == 'adadelta':
-        return optim.Adadelta(params=params)
-
-def freeze_params(params):
-    for p in params:
-        p.requires_grad = False
-
-def unfreeze_params(params):
-    for p in params:
-        p.requires_grad = True
-
-def freeze_model(model):
-    freeze_params(model.parameters())
-
-def unfreeze_model(model):
-    unfreeze_params(model.parameters())
 
 def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1,
                relu=True, bn=True, dropout=True, dropout_p=0.2):
@@ -264,3 +242,17 @@ class DaiModel(nn.Module):
         #     kwargs['classifier'].update_multi_accuracies(outputs, labels, self.pred_thresh)
         
         return loss.item(), outputs
+
+    def freeze(self):
+        freeze_params(params(self.model))
+        modules = list(self.model.children())
+        if len(modules) > 1:
+            unfreeze_params(params(modules[-1]))
+        else:
+            for m in modules:
+                if len(m) > 1:
+                    unfreeze_params(params(m[-1]))
+                    break
+
+    def unfreeze(self):
+        unfreeze_params(params(self.model))

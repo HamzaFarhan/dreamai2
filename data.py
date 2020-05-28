@@ -133,19 +133,35 @@ def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instan
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
-    for dl in dls:
-        dl.class_names = class_names
-        dl.num_classes = len(class_names)
-        dl.is_multi = is_multi
-        dl.data_type = 'classification'
-        dl.is_one_hot = is_multi + force_one_hot
-        if dl.is_one_hot:
-            dl.suggested_crit = nn.BCEWithLogitsLoss()
-            dl.suggested_metric = 'multi_accuracy'
-        else:
-            dl.suggested_crit = nn.CrossEntropyLoss()
-            dl.suggested_metric = 'accuracy'
+    dls = DataLoaders(*dls)
+    dls.class_names = class_names
+    dls.num_classes = len(class_names)
+    dls.is_multi = is_multi
+    dls.data_type = 'classification'
+    dls.is_one_hot = is_multi + force_one_hot
+    if dls.is_one_hot:
+        dls.suggested_crit = nn.BCEWithLogitsLoss()
+        dls.suggested_metric = 'multi_accuracy'
+    else:
+        dls.suggested_crit = nn.CrossEntropyLoss()
+        dls.suggested_metric = 'accuracy'
+    # for dl in dls:
+    #     dl.class_names = class_names
+    #     dl.num_classes = len(class_names)
+    #     dl.is_multi = is_multi
+    #     dl.data_type = 'classification'
+    #     dl.is_one_hot = is_multi + force_one_hot
+    #     if dl.is_one_hot:
+    #         dl.suggested_crit = nn.BCEWithLogitsLoss()
+    #         dl.suggested_metric = 'multi_accuracy'
+    #     else:
+    #         dl.suggested_crit = nn.CrossEntropyLoss()
+    #         dl.suggested_metric = 'accuracy'
     return dls
+
+class DataLoaders():
+    def __init__(self, train=None, valid=None, test=None):
+        store_attr(self, 'train,valid,test')
 
 def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True):
     dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle,

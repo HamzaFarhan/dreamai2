@@ -5,7 +5,7 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
                     '.pat','.pbm','.pcx','.pgm','.png','.pnm','.ppm','.psd','.ras','.rgb','.svg','.svgz',
                     '.tif','.tiff','.wbmp','.xbm','.xpm','.xwd'}
 
-DEFAULTS = {'image_extensions': image_extensions}
+# DEFAULTS = {'image_extensions': image_extensions}
 
 def save_obj(path, obj):
     with open(path, 'wb') as f:
@@ -49,6 +49,20 @@ def denorm_img_general(inp, mean=None, std=None):
     inp = std * inp + mean
     inp = np.clip(inp, 0., 1.)
     return inp 
+
+def denorm_img(x, mean=None, std=None):
+    if is_tensor(x):
+        x = tensor_to_img(x)
+    if mean is None:
+        mean = np.mean(x)
+    if std is None:    
+        std = np.std(x)
+    mean = mean.numpy()
+    std = std.numpy()
+    x = std * x + mean
+    x =  img_float_to_int(x)
+    # x = np.clip(x, 0., 1.)
+    return x 
 
 def img_on_bg(img, bg, x_factor=1/2, y_factor=1/2):
 
@@ -138,7 +152,7 @@ def get_img_stats(dataset,channels):
     print('Done')
     return imgs_mean,imgs_std
 
-def denorm_tensor(x,img_mean,img_std):
+def denorm_tensor(x, img_mean, img_std):
     if x.dim() == 3:
         x.unsqueeze_(0)
     x[:, 0, :, :] = x[:, 0, :, :] * img_std[0] + img_mean[0]
@@ -154,7 +168,7 @@ def filter_modules(net, module):
 
 def tensor_to_img(t):
     if t.dim() > 3:
-        return [np.transpose(t_,(1,2,0)) for t_ in t]
+        return [np.array(np.transpose(t_,(1,2,0))) for t_ in t]
     return np.array(np.transpose(t,(1,2,0)))
 
 def smooth_labels(labels,eps=0.1):
@@ -232,11 +246,46 @@ def remove_key(d, x):
         if x in k:
             del d[k]
 
+def is_cuda(model):
+    return next(model.parameters()).is_cuda
+
 def is_list(x):
     return isinstance(x, list)
 
+def is_df(x):
+    return isinstance(x, pd.core.frame.DataFrame)
+
 def is_str(x):
     return isinstance(x, str)
+
+def is_array(x):
+    return isinstance(x, np.ndarray)
+
+def is_tensor(x):
+    return isinstance(x, torch.Tensor)
+
+def is_set(x):
+    return isinstance(x, set)
+
+def is_path(x):
+    return isinstance(x, Path)
+
+def is_norm(x):
+    return type(x).__name__ == 'Normalize'
+
+def get_norm(tfms):
+    tfms_list = list(tfms)
+    for t in tfms_list:
+        if is_norm(t):
+            return t
+    return False
+
+def has_norm(tfms):
+    tfms_list = list(tfms)
+    for t in tfms_list:
+        if is_norm(t):
+            return True
+    return False
 
 def to_tensor(x):
     t = AT.ToTensor()
@@ -290,15 +339,17 @@ def params(m):
     "Return all parameters of `m`"
     return [p for p in m.parameters()]
 
-def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None, extra=[]):
+def instant_tfms(h=224,w=224, resize=albu.Resize, test_resize=albu.Resize, tensorfy=True, img_mean=None, img_std=None, extra=[]):
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
         t = AT.ToTensor()
-    tfms = extra+[albu.Resize(h, w), normalize, t]
-    tfms = albu.Compose(tfms)
-    return tfms
+    tfms1 = [resize(height=h, width=w), *extra, normalize, t]
+    tfms2 = [test_resize(height=h, width=w), normalize, t]
+    tfms1 = albu.Compose(tfms1)
+    tfms2 = albu.Compose(tfms2)
+    return tfms1, tfms2
 
 def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
     # t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0),
@@ -309,9 +360,9 @@ def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
 
 def apply_tfms(img, tfms):
     try:
-        img = tfms(img)
+        return tfms(img)
     except:
-        img = tfms(image=img)['image']
+        return tfms(image=img)['image']
 
 def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
                   stats_percentage = 1., channels = 3, num_workers = 6):
@@ -419,7 +470,7 @@ def mini_batch(dataset,bs,start=0):
 
 def pad_list(x, n):
     y = x
-    if isinstance(y[0], list):
+    if is_list(y[0]):
         y+=list_map(list(np.tile(y[-1], (n,1))), list)
     else:
         y+=list(np.tile(y[-1], (n)))

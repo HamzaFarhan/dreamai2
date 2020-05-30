@@ -1,4 +1,5 @@
 from .core import *
+from .data import *
 
 class GetAttr:
     "Inherit from this to have all attr accesses in `self._xtra` passed down to `self.default`"
@@ -38,6 +39,9 @@ class Callback(GetAttr):
     
     def after_fit(self): pass
 
+    def before_predict(self): pass
+    def after_predict(self): pass
+
 class CheckpointCallback(Callback):
     def __init__(self, metric='loss', curr_best=None, save_every=1, save_name='model_checkpoint'):
 
@@ -75,17 +79,23 @@ class CheckpointCallback(Callback):
                 bottom = '*'*(len(top)-2)
                 print(f'{bottom}\n')
                 self.curr_best = curr_metric
-                torch.save({'model': self.model.state_dict(),
-                            'optimizer': self.model.optimizer.state_dict(),
-                            self.save_metric: self.curr_best
-                            }, self.save_name)
+                checkpoint = self.model.checkpoint_dict()
+                checkpoint[self.save_metric] = self.curr_best
+                if 'accuracy' in self.save_metric:
+                    checkpoint['class_names'] = self.dls.class_names
+                torch.save(checkpoint, self.save_name)
+                # torch.save({'model': self.model.state_dict(),
+                #             'optimizer': self.model.optimizer.state_dict(),
+                #             self.save_metric: self.curr_best
+                #             }, self.save_name)
     
     def after_fit(self):
         if self.save_name.exists() and self.load_best:
             checkpoint = torch.load(self.save_name)
-            load_state_dict(self.model, checkpoint['model'])
-            self.learner.model.optimizer.load_state_dict(checkpoint['optimizer'])
-            print('Best model loaded and model put in eval mode.')
+            self.model.load_checkpoint(checkpoint)
+            # load_state_dict(self.model, checkpoint['model'])
+            # self.learner.model.optimizer.load_state_dict(checkpoint['optimizer'])
+            print('Best model loaded.')
 
 class BasicCallback(Callback):
     
@@ -116,7 +126,7 @@ class BasicCallback(Callback):
     def before_val_epoch(self):
         self.learner.val_running_loss = 0.
         self.learner.classifier = None
-        if 'accuracy' in self.fit_metric:
+        if 'accuracy' in self.learn_metric:
             self.learner.classifier = Classifier(self.dls.class_names)
     
     def after_val_batch(self):
@@ -125,18 +135,48 @@ class BasicCallback(Callback):
     def after_val_epoch(self):
         self.learner.val_ret = {}
         self.learner.val_ret['loss'] = self.val_running_loss/self.num_batches
-        if 'accuracy' in self.fit_metric:
-            self.learner.val_ret[self.fit_metric],\
+        if 'accuracy' in self.learn_metric:
+            self.learner.val_ret[self.learn_metric],\
             self.learner.val_ret['class_accuracies'] = self.classifier.get_final_accuracies()
 
     def after_valid(self):
         self.learner.model.train()
 
+    def after_predict(self):
+        if self.learn_metric == 'accuracy':
+            p = nn.Softmax()(self.pred_out).cpu()
+            m = torch.max(p, 1)
+            c = np.array(self.dls.class_names)[m[1]]
+            # pred_out = []
+            p = p[0]
+            self.learner.pred_out = {'probs': p, 'pred': c}
+            # for i,pred in enumerate(p):
+            #     if is_str(c):
+            #         pred_out.append([pred, c])
+            #     else:
+            #         pred_out.append([pred, c[i]])
+            # self.learner.pred_out = flatten_list(pred_out)
+            # self.learner.pred_out = [p.tolist(), c.tolist()]
+
+        if self.learn_metric == 'multi_accuracy':
+            p = nn.Sigmoid()(self.pred_out).cpu()[0]
+            bools = (p >= self.pred_thresh)
+            print(bools)
+            c = np.array(self.dls.class_names)[bools]
+            self.learner.pred_out = {'probs': p, 'bools':bools, 'pred': c}
+        # if 'accuracy' in self.learn_metric:
+
+
 class Learner:
-    def __init__(self, model, dls, model_splitter=None, cbs=[BasicCallback()]):
+    def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()]):
 
         store_attr(self, 'model,dls,model_splitter,cbs')
+        self.learn_metric = metric
         for cb in cbs: cb.learner = self
+        self.model.normalize = dls.normalize
+        self.model.denorm = dls.denorm
+        self.model.img_mean = dls.img_mean
+        self.model.img_std = dls.img_std
         assert len(cbs) > 0, print('Please pass some callbacks for training.')
     
     def print_train_progress(self, progress={}):
@@ -225,7 +265,7 @@ class Learner:
     
     def val_batch(self):
         self('before_val_batch')
-        self.val_batch_loss = self.model.val_batch_to_loss(self.data_batch, metric=self.fit_metric,
+        self.val_batch_loss = self.model.val_batch_to_loss(self.data_batch, metric=self.learn_metric,
                                                            classifier=self.classifier)[0]
         self('after_val_batch')
     
@@ -251,7 +291,7 @@ class Learner:
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True):
         
         self.fit_epochs = epochs
-        self.fit_metric = metric
+        self.learn_metric = metric
         self.fit_print_every = print_every
         self.fit_validate_every = validate_every
         self.load_best = load_best
@@ -271,7 +311,116 @@ class Learner:
                 self.val_epoch()
                 self('after_valid')                
         self('after_fit')
+
+    def predict(self, x, pred_thresh=None, device=None):
+
+        if pred_thresh is None:
+            self.pred_thresh = self.model.pred_thresh
+        else:
+            self.pred_thresh = pred_thresh
+
+        if is_df(x):
+            x = list(x.iloc[:,0])
+        elif is_array(x):
+            if x.ndim == 3:
+                x = [x]
+            else:
+                x = list(x)
+        elif is_tensor(x):
+            x = tensor_to_img(x)
+            if is_array(x):
+                x = [x]
+        dl = self.dls.test
+        dset = dl.dataset
+        tfms = dset.tfms
+        # tfms = None
+        self.pred_set = PredDataset(x, tfms=tfms)
+        # pred_dl = DataLoader(self.pred_set, batch_size=bs)
+        self.pred_outs = []
+        for idx,data_batch in enumerate(self.pred_set):
+            self.pred_out = self.model.predict(data_batch, device=device)
+            self('after_predict')
+            self.pred_outs.append(self.pred_out)
+
+        return self.pred_outs
+
+    def evaluate(self, dl, metric=None, pred_thresh=None, device=None):
+
+        if device is None:
+            device = self.model.device
     
+        if pred_thresh is None:
+            pred_thresh = self.model.pred_thresh
+        else:
+            pred_thresh = pred_thresh
+
+        if metric is None:
+            metric = self.learn_metric
+        else:
+            metric = metric
+
+        running_loss = 0.
+        classifier = None
+
+        if 'accuracy' in metric:
+            try:
+                class_names = self.dls.class_names
+            except:
+                class_names = self.model.class_names
+            classifier = Classifier(class_names)
+
+        y_pred = []
+        y_prob = []
+        y_true = []
+
+        self.model.eval()
+        rmse_ = 0.
+        with torch.no_grad():
+            for data_batch in dl:
+                loss, outputs = self.model.batch_to_loss(data_batch, backward_step=False, device=device)
+                running_loss += loss
+                if classifier is not None:
+                    labels = data_batch[1].to(device)
+                    if metric == 'accuracy':
+                        classifier.update_accuracies(outputs, labels)
+                        try:
+                            y_true.extend(list(labels.squeeze(0).cpu().numpy()))
+                            prob, preds = torch.max(nn.Softmax()(outputs).cpu(), 1)
+                            # m = torch.max(p, 1)
+                            # prob, preds = torch.max(torch.exp(outputs), 1)
+                            y_pred.extend(list(preds.cpu().numpy()))
+                            y_prob.extend(list(prob.cpu().numpy()))
+                        except:
+                            pass
+                    elif metric == 'multi_accuracy':
+                        classifier.update_multi_accuracies(outputs, labels, pred_thresh)
+                elif metric == 'rmse':
+                    rmse_ += rmse(outputs,labels).cpu().numpy()
+            
+        self.model.train()
+
+        ret = {}
+        # print('Running_loss: {:.3f}'.format(running_loss))
+        if metric == 'rmse':
+            print('Total rmse: {:.3f}'.format(rmse_))
+            ret['final_rmse'] = rmse_/len(dl)
+
+        ret['final_loss'] = running_loss/len(dl)
+
+        if classifier is not None:
+            ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
+            try:
+                ret['report'] = classification_report(y_true, y_pred, target_names=class_names)
+                ret['confusion_matrix'] = confusion_matrix(y_true, y_pred)
+                try:
+                    ret['roc_auc_score'] = roc_auc_score(np.array(y_true), np.array(y_prob),
+                                           multi_class='ovo', labels=class_names)
+                except:
+                    pass
+            except:
+                pass
+        return ret
+
     def freeze(self):
         if self.model_splitter:
             freeze_params(params(self.model))

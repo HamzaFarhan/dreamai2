@@ -3,11 +3,15 @@ from .dai_imports import *
 
 class DaiDataset(Dataset):
     
-    def __init__(self, data, data_dir='', tfms=instant_tfms(), channels=3, **kwargs):
+    def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
         super(DaiDataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
-        self.tfms = albu.Compose(tfms)
+        self.tfms = tfms
+        # if tfms is not None:
+            # self.tfms = albu.Compose(tfms)
+        # else:
+            # self.tfms = tfms
         self.channels = channels
         for k in kwargs:
             setattr(self, k, kwargs[k])
@@ -16,37 +20,89 @@ class DaiDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, index):
-        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
+        try:
+            img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+        except:
+            img_path = os.path.join(self.data_dir, self.data[index, 0])
         if self.channels == 3:
             img = rgb_read(img_path)
         else:    
             img = c1_read(img_path)
-            
-        y = self.data.iloc[index, 1]    
-        x = self.tfms(image=img)['image']
-        if self.channels == 1:
-            x = x.unsqueeze(0)
+        try:
+            y = self.data.iloc[index, 1]
+        except:
+            y = self.data[index, 1]
+        if self.tfms is not None:
+            x = apply_tfms(img, self.tfms)
+            # x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x = x.unsqueeze(0)
+        else:
+            x = img
         if is_str(y) and hasattr(self, 'class_names'):
             y = self.class_names.index(y)
         return x, y, self.data.iloc[index, 0]
 
-    def get_at_index(self, index, show=True):
+    def get_at_index(self, index, denorm=True, show=True):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
         if self.channels == 3:
             img = rgb_read(img_path)
         else:    
             img = c1_read(img_path)
             
-        y = self.data.iloc[index, 1]    
-        x = (self.tfms(image=img)['image'])
-        if self.channels == 1:
-            x = x.unsqueeze(0)
-        x = tensor_to_img(x)
+        y = self.data.iloc[index, 1]
+        if self.tfms is not None:
+            x = apply_tfms(img, self.tfms)
+            # x = (self.tfms(image=img)['image'])
+            if self.channels == 1:
+                x = x.unsqueeze(0)
+            x = tensor_to_img(x)
+            if denorm:
+                norm_t = get_norm(self.tfms)
+                if norm_t:
+                    mean = norm_t.mean
+                    std = norm_t.std
+                    x = denorm_img(x, mean, std)
+        else:
+            x = img
+        # if 'float' in x.dtype.name:
+            # x = img_float_to_int(x)
         p = self.data.iloc[index, 0]
         if show:
             print(f'path:{p}')
             plt_show(x, title=y)
         return x, y, p
+
+class PredDataset(Dataset):
+    def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
+        super(Dataset, self).__init__()
+        self.data_dir = data_dir
+        self.data = data
+        self.tfms = tfms
+        self.channels = 3
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
+    
+    def __getitem__(self, index):
+
+        try:
+            img_path = os.path.join(self.data_dir, self.data[index])
+            if self.channels == 3:
+                img = rgb_read(img_path)
+            else:    
+                img = c1_read(img_path)
+        except:
+            img = self.data[index]
+
+        if self.tfms is not None:
+            x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x = x.unsqueeze(0)
+        else:
+            x = img
+        return x
+
+    def __len__(self): return len(self.data)
 
 class dai_classifier_dataset(Dataset):
     
@@ -76,39 +132,8 @@ class dai_classifier_dataset(Dataset):
             y = self.class_names.index(y)
         return x, y, self.data.iloc[index, 0]
 
-# def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instant_tfms(224, 224),
-#                        bs=64, shuffle=True, pin_memory=False, num_workers=4, force_one_hot=False,
-#                        class_names=None, split=True, val_size=0.2, test_size=0.15):
-    
-#     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
-#     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
-#     if class_names is None:
-#         class_names = np.unique(flatten_list(labels))
-#     class_names = list_map(class_names, str)
-#     one_hot_labels = dai_one_hot(labels, class_names)
-    
-#     df['one_hot'] = list(one_hot_labels)
-#     cols = df.columns.to_list()
-#     df = df[[cols[0], cols[-1], *cols[1:-1]]]
-#     dfs = [df]
-#     if split:
-#         dfs = split_df(df, val_size, stratify_idx=2)
-#         if test_size > 0:
-#             val_df, test_df = split_df(dfs[1], test_size, stratify_idx=2)
-#             dfs = [dfs[0], val_df, test_df]
-#     dsets = [dset(data_dir=data_dir, data=df, tfms=tfms) for df in dfs]
-#     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
-#     if split:
-#         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
-#     for dl in dls:
-#         dl.class_names = class_names
-#         dl.num_classes = len(class_names)
-#         dl.is_multi = is_multi
-#         dl.data_type = 'classification'
-#     return dls
-
-def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instant_tfms(224, 224),
-                       bs=64, shuffle=True, pin_memory=False, num_workers=4, force_one_hot=False,
+def get_classifier_dls(df, data_dir='', dset=DaiDataset, tfms=instant_tfms(224, 224),
+                       bs=64, shuffle=True, pin_memory=True, num_workers=4, force_one_hot=False,
                        class_names=None, split=True, val_size=0.2, test_size=0.15):
     
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
@@ -117,6 +142,8 @@ def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instan
         class_names = np.unique(flatten_list(labels))
     class_names = list_map(class_names, str)
     stratify_idx = 1
+    dfs = [df]
+    transforms_ = [tfms[0]]
     if is_multi or force_one_hot:
         one_hot_labels = dai_one_hot(labels, class_names)    
         df['one_hot'] = list(one_hot_labels)
@@ -126,10 +153,13 @@ def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instan
         stratify_idx = 2
     if split:
         dfs = split_df(df, val_size, stratify_idx=stratify_idx)
+        transforms_ = [tfms[0], tfms[1]]
         if test_size > 0:
             val_df, test_df = split_df(dfs[1], test_size, stratify_idx=stratify_idx)
             dfs = [dfs[0], val_df, test_df]
-    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms, class_names=class_names) for df in dfs]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
@@ -145,31 +175,106 @@ def get_classifier_dls(df, data_dir='', dset=dai_classifier_dataset, tfms=instan
     else:
         dls.suggested_crit = nn.CrossEntropyLoss()
         dls.suggested_metric = 'accuracy'
-    # for dl in dls:
-    #     dl.class_names = class_names
-    #     dl.num_classes = len(class_names)
-    #     dl.is_multi = is_multi
-    #     dl.data_type = 'classification'
-    #     dl.is_one_hot = is_multi + force_one_hot
-    #     if dl.is_one_hot:
-    #         dl.suggested_crit = nn.BCEWithLogitsLoss()
-    #         dl.suggested_metric = 'multi_accuracy'
-    #     else:
-    #         dl.suggested_crit = nn.CrossEntropyLoss()
-    #         dl.suggested_metric = 'accuracy'
+
     return dls
 
 class DataLoaders():
     def __init__(self, train=None, valid=None, test=None):
         store_attr(self, 'train,valid,test')
+        if self.train:
+            self.train_ds = self.train.dataset
+        if self.valid:
+            self.valid_ds = self.valid.dataset
+        if self.test:
+            self.test_ds = self.test.dataset
+
+        norm_t = get_norm(self.train_ds.tfms)
+        if norm_t:
+            self.normalize = partial(apply_tfms, tfms=norm_t)
+            self.denorm = partial(denorm_img, mean=norm_t.mean, std=norm_t.std)
+            self.img_mean = norm_t.mean
+            self.img_std = norm_t.std
+        else:
+            self.normalize = noop
+            self.denorm = noop
+            self.img_mean, self.img_std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+
+        self.suggested_crit = nn.CrossEntropyLoss()
+        self.suggested_metric = 'loss'
+
+    def one_batch(self, dl_name='train'):
+        return next_batch(getattr(self, dl_name))
+
+    def __len__(self):
+        return sum([(self.train!=None) + (self.valid!=None) + (self.test!=None)])
 
 def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True):
     dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle,
                       num_workers=num_workers, pin_memory=pin_memory) for dset in dsets]
-    for dl in dls:
-        dl.suggested_metric = 'loss'
-        dl.suggested_crit = None
+    # for dl in dls:
+        # dl.suggested_metric = 'loss'
+        # dl.suggested_crit = None
     return dls
+
+def get_data_stats(df, image_size=224, stats_percentage=0.7, bs=32):
+    
+    print('Calculating dataset mean and std. This may take a while.', end='')
+    frac_data = df.sample(frac=stats_percentage).reset_index(drop=True).copy()
+    tfms = instant_tfms(image_size, image_size)[1]
+    dset = DaiDataset(frac_data, tfms=tfms)
+    dl = DataLoader(dset, batch_size=32)
+    print('.', end='')
+    mean = 0.0
+    for data_batch in dl:
+        images = data_batch[0]
+        batch_samples = images.size(0) 
+        images = images.view(batch_samples, images.size(1), -1)
+        mean += images.mean(2).sum(0)
+    mean = mean / len(dl.dataset)
+    print('.', end='')
+    var = 0.0
+    for data_batch in dl:
+        images = data_batch[0]
+        batch_samples = images.size(0)
+        images = images.view(batch_samples, images.size(1), -1)
+        var += ((images - mean.unsqueeze(1))**2).sum([0,2])
+    std = torch.sqrt(var / (len(dl.dataset)*image_size*image_size))
+    print('Done.')
+    return mean, std
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class dai_image_csv_dataset(Dataset):
     

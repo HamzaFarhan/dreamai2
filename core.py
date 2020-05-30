@@ -1,5 +1,6 @@
 from .utils import *
 from .dai_imports import *
+from .plot_eval import *
 
 
 models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
@@ -288,3 +289,18 @@ class DaiModel(nn.Module):
         for k in checkpoint.keys():
             if k not in ['model', 'optimizer']:
                 setattr(self, k, checkpoint[k])
+
+class ConfusionMatrix():
+    def __init__(self, matrix, class_names):
+        self.matrix = matrix
+        self.class_names = class_names
+
+    def show(self, figsize=[8,8]):
+        plot_confusion_matrix(self.matrix, self.class_names, figsize=figsize)
+
+class ClassificationReport():
+    def __init__(self, report):
+        self.report = report
+
+    def show(self):
+        plot_classification_report(self.report)

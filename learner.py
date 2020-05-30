@@ -410,8 +410,8 @@ class Learner:
         if classifier is not None:
             ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
             try:
-                ret['report'] = classification_report(y_true, y_pred, target_names=class_names)
-                ret['confusion_matrix'] = confusion_matrix(y_true, y_pred)
+                ret['report'] = ClassificationReport(classification_report(y_true, y_pred, target_names=class_names))
+                ret['confusion_matrix'] = ConfusionMatrix(confusion_matrix(y_true, y_pred), class_names)
                 try:
                     ret['roc_auc_score'] = roc_auc_score(np.array(y_true), np.array(y_prob),
                                            multi_class='ovo', labels=class_names)

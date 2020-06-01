@@ -253,6 +253,9 @@ def is_cuda(model):
 def is_list(x):
     return isinstance(x, list)
 
+def is_tuple(x):
+    return isinstance(x, tuple)
+
 def is_df(x):
     return isinstance(x, pd.core.frame.DataFrame)
 
@@ -399,8 +402,10 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
     return tfms1, tfms2
 
 def self_sup_tfms(tfms1, tfms2):
-    tfms1.transforms.transforms.insert(0, albu.RandomGridShuffle())
-    return tfms1, tfms2
+    tfms = copy.deepcopy(tfms1)
+    # tfms.transforms.transforms.insert(0, albu.RandomGridShuffle(p=1.))
+    tfms.transforms.transforms.insert(-2, albu.RandomGridShuffle(p=1.))
+    return tfms, tfms2
 
 def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resize,
              tensorfy=True, img_mean=None, img_std=None, aug_n=4, aug_m=1):

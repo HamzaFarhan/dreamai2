@@ -196,6 +196,32 @@ class DaiModel(nn.Module):
         ret = {'loss': loss.item(), 'outputs': outputs}
         return loss.item(), outputs
     
+    def ss_forward(self, img1, img2):
+        ss_model = copy.deepcopy(self.model[0])
+        return flatten_tensor(ss_model(img1).detach()), flatten_tensor(self.model[0](img2))
+
+    def ss_batch_to_loss(self, data_batch, backward_step=True, device=None):
+        if device is None:
+            device = self.device
+        img1, labels, img2 = data_batch[0], data_batch[1], data_batch[2]
+        img1 = img1.to(device)
+        img2 = img2.to(device)
+        labels = labels.to(device)
+        ss_outputs = self.ss_forward(img1, img2)
+        outputs = self.forward(img1)
+        loss = self.compute_loss(outputs, labels)
+        y = torch.ones(ss_outputs[0].shape[0]).to(device)
+        # print(y.shape, ss_outputs[0].shape)
+        l = torch.nn.CosineEmbeddingLoss()
+        ss_loss = l(*ss_outputs, y)
+        loss += ss_loss
+        if backward_step:
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+        ret = {'loss': loss.item(), 'outputs': outputs}
+        return loss.item(), outputs
+
     def update_accuracy(self, outputs, labels, classifier, metric):
         if metric == 'accuracy':
             classifier.update_accuracies(outputs, labels)

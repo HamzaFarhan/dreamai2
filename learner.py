@@ -191,7 +191,9 @@ class Learner:
             batch_time = time.time()-self.t1
 
             if self.total_time == 0:
-                total_time = (batch_time*self.num_batches*self.fit_epochs) + (self.fit_epochs/self.fit_validate_every)
+                # total_time = (batch_time*self.num_batches*self.fit_epochs) + (self.fit_epochs/self.fit_validate_every)
+                # total_time += total_time/5
+                total_time = (batch_time*self.num_batches)
                 total_time += total_time/5
                 if total_time > 60:
                     total_time /= 60.
@@ -261,7 +263,10 @@ class Learner:
     
     def train_batch(self):
         self('before_train_batch')
-        self.tr_batch_loss = self.model.batch_to_loss(self.data_batch)[0]
+        if self.self_sup:
+            self.tr_batch_loss = self.model.ss_batch_to_loss(self.data_batch)[0]
+        else:
+            self.tr_batch_loss = self.model.batch_to_loss(self.data_batch)[0]
         self('after_train_batch')
     
     def val_batch(self):
@@ -442,19 +447,19 @@ class Learner:
 
 
     def fine_tune(self, frozen_epochs=2, unfrozen_epochs=5, frozen_lr=0.001, unfrozen_lr=0.001,
-                  metric='loss', load_best_frozen=False):
+                  metric='loss', load_best_frozen=False, self_sup=False):
 
         print(f'+{"-"*10}+')
         print(f'+  FROZEN  +')
         print(f'+{"-"*10}+')
         self.freeze()
-        self.fit(frozen_epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen)
+        self.fit(frozen_epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen, self_sup=self_sup)
         print()
         print(f'+{"-"*10}+')
         print(f'+ UNFROZEN +')
         print(f'+{"-"*10}+')
         self.unfreeze()
-        self.fit(unfrozen_epochs, lr=unfrozen_lr, metric=metric, load_best=True)
+        self.fit(unfrozen_epochs, lr=unfrozen_lr, metric=metric, load_best=True, self_sup=self_sup)
 
     def find_lr(self, dl=None, init_value=1e-8, final_value=10., beta=0.98, plot=False):
 

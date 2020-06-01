@@ -208,7 +208,7 @@ def plot_classification_report(cr, title='Classification report ', with_avg_tota
         if(len(t)==0): break
         classes.append(t[0])
         v = [float(x) for x in t[1: len(t) - 1]]
-        print(v)
+        # print(v)
         plotMat.append(v)
 
     if with_avg_total:
@@ -216,7 +216,7 @@ def plot_classification_report(cr, title='Classification report ', with_avg_tota
         classes.append('avg/total')
         vAveTotal = [float(x) for x in t[1:len(aveTotal) - 1]]
         plotMat.append(vAveTotal)
-        
+
     plt.imshow(plotMat, interpolation='nearest', cmap=cmap)
     plt.title(title)
     plt.colorbar()

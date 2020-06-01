@@ -300,7 +300,20 @@ class ConfusionMatrix():
 
 class ClassificationReport():
     def __init__(self, report):
+        self.str_report = report
+
+        split = report.split('\n')
+        scores = [x for x in split[0].split(' ') if len(x)>0]
+        report = {}
+        l = list_map(split[2:-5], lambda x:x.split())
+        class_names = [x[0] for x in l]
+        vals = [x[1:] for x in l]
+        for i,val in enumerate(vals):
+            scores_dict = {}
+            for j,s in enumerate(val):
+                scores_dict[scores[j]] = s
+            report[class_names[i]] = scores_dict
         self.report = report
 
     def show(self):
-        plot_classification_report(self.report)
+        plot_classification_report(self.str_report)

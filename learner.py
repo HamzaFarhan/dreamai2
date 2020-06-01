@@ -192,6 +192,7 @@ class Learner:
 
             if self.total_time == 0:
                 total_time = (batch_time*self.num_batches*self.fit_epochs) + (self.fit_epochs/self.fit_validate_every)
+                total_time += total_time/5
                 if total_time > 60:
                     total_time /= 60.
                     total_measure = 'min'
@@ -288,13 +289,14 @@ class Learner:
         self('after_val_epoch')
         self.print_valid_progress()
     
-    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True):
+    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True, self_sup=False):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
         self.fit_print_every = print_every
         self.fit_validate_every = validate_every
         self.load_best = load_best
+        self.self_sup = self_sup
         
         if lr:
             set_lr(self.model.optimizer, lr)
@@ -410,7 +412,8 @@ class Learner:
         if classifier is not None:
             ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
             try:
-                ret['report'] = ClassificationReport(classification_report(y_true, y_pred, target_names=class_names))
+                ret['report'] = ClassificationReport(classification_report(y_true, y_pred, target_names=class_names),
+                                                     ret['accuracy'], ret['class_accuracies'])
                 ret['confusion_matrix'] = ConfusionMatrix(confusion_matrix(y_true, y_pred), class_names)
                 try:
                     ret['roc_auc_score'] = roc_auc_score(np.array(y_true), np.array(y_prob),
@@ -418,7 +421,9 @@ class Learner:
                 except:
                     pass
             except:
-                pass
+                print('Classification report and confusion matrix not available.')
+                ret['report'] = None
+                ret['confusion_matrix'] = None
         return ret
 
     def freeze(self):

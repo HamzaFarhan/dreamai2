@@ -299,19 +299,21 @@ class ConfusionMatrix():
         plot_confusion_matrix(self.matrix, self.class_names, figsize=figsize)
 
 class ClassificationReport():
-    def __init__(self, report):
+    def __init__(self, report, accuracy, class_accuracies):
         self.str_report = report
 
         split = report.split('\n')
         scores = [x for x in split[0].split(' ') if len(x)>0]
         report = {}
+        report['Overall Accuracy'] = accuracy
         l = list_map(split[2:-5], lambda x:x.split())
         class_names = [x[0] for x in l]
         vals = [x[1:] for x in l]
         for i,val in enumerate(vals):
             scores_dict = {}
             for j,s in enumerate(val):
-                scores_dict[scores[j]] = s
+                scores_dict[scores[j]] = float(s)
+            scores_dict['accuracy'] = class_accuracies[i][1]
             report[class_names[i]] = scores_dict
         self.report = report
 

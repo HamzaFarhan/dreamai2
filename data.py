@@ -55,7 +55,7 @@ class DaiDataset(Dataset):
             if self.channels == 1:
                 x2 = x2.unsqueeze(0)
         else:
-            x2 = None
+            x2 = x
         if is_str(y) and hasattr(self, 'class_names'):
             y = self.class_names.index(y)
         return x, y, x2, self.data.iloc[index, 0]
@@ -92,9 +92,9 @@ class DaiDataset(Dataset):
                 if norm_t:
                     mean = norm_t.mean
                     std = norm_t.std
-                    x2 = denorm_img(x2, mean, std)            
+                    x2 = denorm_img(x2, mean, std)         
         else:
-            x2 = None
+            x2 = x
         
         # if 'float' in x.dtype.name:
             # x = img_float_to_int(x)
@@ -102,7 +102,7 @@ class DaiDataset(Dataset):
         if show:
             print(f'path:{p}')
             plt_show(x, title=y)
-            if x2 is not None:
+            if self.ss_tfms is not None:
                 plt_show(x2, title=f'SS Augmented: {y}')
         return x, y, x2, p
 
@@ -181,7 +181,7 @@ def get_classifier_dls(dfs, data_dir='', dset=DaiDataset, tfms=instant_tfms(224,
     stratify_idx = 1
     dfs = [df]
     transforms_ = [tfms[0]]
-    ss_transforms = [ss_tfms[0]]
+    # ss_transforms = [ss_tfms[0]]
     if is_multi or force_one_hot:
         one_hot_labels = dai_one_hot(labels, class_names)    
         df['one_hot'] = list(one_hot_labels)
@@ -196,7 +196,8 @@ def get_classifier_dls(dfs, data_dir='', dset=DaiDataset, tfms=instant_tfms(224,
             val_df, test_df = split_df(dfs[1], test_size, stratify_idx=stratify_idx)
             dfs = [dfs[0], val_df, test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
-    if is_list(ss_tfms) or is_tuple(ss_tfms): ss_tfms = ss_tfms[0]
+    if ss_tfms is not None:
+        if is_list(ss_tfms) or is_tuple(ss_tfms): ss_tfms = ss_tfms[0]
     dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,
                   ss_tfms=ss_tfms, class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)

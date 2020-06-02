@@ -281,7 +281,10 @@ def is_norm(x):
     return type(x).__name__ == 'Normalize'
 
 def get_norm(tfms):
-    tfms_list = list(tfms)
+    try:
+        tfms_list = list(tfms)
+    except:
+        tfms_list = list(tfms.transforms)
     for t in tfms_list:
         if is_norm(t):
             return t
@@ -401,7 +404,7 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
     tfms2 = albu.Compose(tfms2)
     return tfms1, tfms2
 
-def self_sup_tfms(tfms1, tfms2):
+def semi_sup_tfms(tfms1, tfms2):
     tfms = copy.deepcopy(tfms1)
     # tfms.transforms.transforms.insert(0, albu.RandomGridShuffle(p=1.))
     tfms.transforms.transforms.insert(-2, albu.RandomGridShuffle(p=1.))
@@ -416,8 +419,8 @@ def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resiz
         normalize = transforms.Normalize(img_mean, img_std)
     if tensorfy:
         t = transforms.ToTensor()
-    tfms1 = [resize((h,w)), normalize, t]
-    tfms2 = [test_resize((h,w)), normalize, t]
+    tfms1 = [resize((h,w)), t, normalize]
+    tfms2 = [test_resize((h,w)), t, normalize]
     tfms1 = transforms.Compose(tfms1)
     tfms1.transforms.insert(1, extra)
     tfms2 = transforms.Compose(tfms2)

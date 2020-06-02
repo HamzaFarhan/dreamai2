@@ -90,6 +90,8 @@ class CheckpointCallback(Callback):
                 #             }, self.save_name)
     
     def after_fit(self):
+        checkpoint = torch.load(self.save_name)
+        self.learner.checkpoint = checkpoint
         if self.save_name.exists() and self.load_best:
             checkpoint = torch.load(self.save_name)
             self.model.load_checkpoint(checkpoint)
@@ -191,7 +193,10 @@ class Learner:
             batch_time = time.time()-self.t1
 
             if self.total_time == 0:
-                total_time = (batch_time*self.num_batches*self.fit_epochs) + (self.fit_epochs/self.fit_validate_every)
+                # total_time = (batch_time*self.num_batches*self.fit_epochs) + (self.fit_epochs/self.fit_validate_every)
+                # total_time += total_time/5
+                total_time = (batch_time*self.num_batches)
+                total_time += total_time/4
                 if total_time > 60:
                     total_time /= 60.
                     total_measure = 'min'
@@ -260,7 +265,10 @@ class Learner:
     
     def train_batch(self):
         self('before_train_batch')
-        self.tr_batch_loss = self.model.batch_to_loss(self.data_batch)[0]
+        if self.semi_sup:
+            self.tr_batch_loss = self.model.ss_batch_to_loss(self.data_batch)[0]
+        else:
+            self.tr_batch_loss = self.model.batch_to_loss(self.data_batch)[0]
         self('after_train_batch')
     
     def val_batch(self):
@@ -288,13 +296,14 @@ class Learner:
         self('after_val_epoch')
         self.print_valid_progress()
     
-    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True):
+    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True, semi_sup=False):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
         self.fit_print_every = print_every
         self.fit_validate_every = validate_every
         self.load_best = load_best
+        self.semi_sup = semi_sup
         
         if lr:
             set_lr(self.model.optimizer, lr)
@@ -410,7 +419,8 @@ class Learner:
         if classifier is not None:
             ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
             try:
-                ret['report'] = ClassificationReport(classification_report(y_true, y_pred, target_names=class_names))
+                ret['report'] = ClassificationReport(classification_report(y_true, y_pred, target_names=class_names),
+                                                     ret['accuracy'], ret['class_accuracies'])
                 ret['confusion_matrix'] = ConfusionMatrix(confusion_matrix(y_true, y_pred), class_names)
                 try:
                     ret['roc_auc_score'] = roc_auc_score(np.array(y_true), np.array(y_prob),
@@ -418,7 +428,9 @@ class Learner:
                 except:
                     pass
             except:
-                pass
+                print('Classification report and confusion matrix not available.')
+                ret['report'] = None
+                ret['confusion_matrix'] = None
         return ret
 
     def freeze(self):
@@ -437,19 +449,22 @@ class Learner:
 
 
     def fine_tune(self, frozen_epochs=2, unfrozen_epochs=5, frozen_lr=0.001, unfrozen_lr=0.001,
-                  metric='loss', load_best_frozen=False):
+                  metric='loss', load_best_frozen=False, semi_sup=False,
+                  print_every=3, validate_every=1, load_best=True):
 
         print(f'+{"-"*10}+')
         print(f'+  FROZEN  +')
         print(f'+{"-"*10}+')
         self.freeze()
-        self.fit(frozen_epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen)
+        self.fit(frozen_epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen, semi_sup=semi_sup,
+                 print_every=print_every, validate_every=validate_every)
         print()
         print(f'+{"-"*10}+')
         print(f'+ UNFROZEN +')
         print(f'+{"-"*10}+')
         self.unfreeze()
-        self.fit(unfrozen_epochs, lr=unfrozen_lr, metric=metric, load_best=True)
+        self.fit(unfrozen_epochs, lr=unfrozen_lr, metric=metric, load_best=load_best, semi_sup=semi_sup,
+                 print_every=print_every, validate_every=validate_every)
 
     def find_lr(self, dl=None, init_value=1e-8, final_value=10., beta=0.98, plot=False):
 

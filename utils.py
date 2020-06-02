@@ -1,4 +1,5 @@
 from .dai_imports import *
+from .randaug import RandAugment
 
 image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.djvu','.erf','.gif','.ico',
                     '.ief','.jng','.jp2','.jpe','.jpeg','.jpf','.jpg','.jpg2','.jpm','.jpx','.nef','.orf',
@@ -252,6 +253,9 @@ def is_cuda(model):
 def is_list(x):
     return isinstance(x, list)
 
+def is_tuple(x):
+    return isinstance(x, tuple)
+
 def is_df(x):
     return isinstance(x, pd.core.frame.DataFrame)
 
@@ -260,6 +264,9 @@ def is_str(x):
 
 def is_array(x):
     return isinstance(x, np.ndarray)
+
+def is_pilimage(x):
+    return 'PIL' in str(type(x))
 
 def is_tensor(x):
     return isinstance(x, torch.Tensor)
@@ -274,7 +281,10 @@ def is_norm(x):
     return type(x).__name__ == 'Normalize'
 
 def get_norm(tfms):
-    tfms_list = list(tfms)
+    try:
+        tfms_list = list(tfms)
+    except:
+        tfms_list = list(tfms.transforms)
     for t in tfms_list:
         if is_norm(t):
             return t
@@ -339,7 +349,8 @@ def params(m):
     "Return all parameters of `m`"
     return [p for p in m.parameters()]
 
-def instant_tfms(h=224,w=224, resize=albu.Resize, test_resize=albu.Resize, tensorfy=True, img_mean=None, img_std=None, extra=[]):
+def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
+                 tensorfy=True, img_mean=None, img_std=None, extra=[]):
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
@@ -351,17 +362,85 @@ def instant_tfms(h=224,w=224, resize=albu.Resize, test_resize=albu.Resize, tenso
     tfms2 = albu.Compose(tfms2)
     return tfms1, tfms2
 
-def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
-    # t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0),
-    #       albu.RandomBrightnessContrast(0.1, 0.1), albu.ShiftScaleRotate(0.03,0,0)]
-    t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0), albu.ShiftScaleRotate(0.03,0,0)]
-    t2 = list(instant_tfms(h, w, tensorfy, img_mean, img_std))
-    return albu.Compose(t1+t2)
+def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
+             tensorfy=True, img_mean=None, img_std=None, extra=[]):
+
+    extra += [
+        albu.RandomRotate90(),
+        albu.Flip(),
+        albu.Transpose(),
+        albu.OneOf([
+            albu.IAAAdditiveGaussianNoise(),
+            albu.GaussNoise(),
+            albu.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True)
+        ], p=0.2),
+        albu.OneOf([
+            albu.MotionBlur(p=.2),
+            albu.MedianBlur(blur_limit=3, p=0.1),
+            albu.Blur(blur_limit=3, p=0.1),
+        ], p=0.2),
+        albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2),
+        albu.OneOf([
+            albu.OpticalDistortion(p=0.3),
+            albu.GridDistortion(p=.1),
+            albu.IAAPiecewiseAffine(p=0.3),
+        ], p=0.2),
+        albu.OneOf([
+            albu.CLAHE(clip_limit=2),
+            albu.IAASharpen(),
+            albu.IAAEmboss(),
+            albu.RandomBrightnessContrast(),            
+        ], p=0.3),
+        albu.HueSaturationValue(p=0.3),
+    ]
+    normalize,t  = None, None
+    if img_mean is not None:
+        normalize = albu.Normalize(img_mean, img_std)
+    if tensorfy:
+        t = AT.ToTensor()
+    tfms1 = [resize(height=h, width=w), *extra, normalize, t]
+    tfms2 = [test_resize(height=h, width=w), normalize, t]
+    tfms1 = albu.Compose(tfms1)
+    tfms2 = albu.Compose(tfms2)
+    return tfms1, tfms2
+
+def semi_sup_tfms(tfms1, tfms2):
+    tfms = copy.deepcopy(tfms1)
+    # tfms.transforms.transforms.insert(0, albu.RandomGridShuffle(p=1.))
+    tfms.transforms.transforms.insert(-2, albu.RandomGridShuffle(p=1.))
+    return tfms, tfms2
+
+def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resize,
+             tensorfy=True, img_mean=None, img_std=None, aug_n=4, aug_m=1):
+    
+    extra = RandAugment(aug_n, aug_m)
+    normalize,t  = noop, noop
+    if img_mean is not None:
+        normalize = transforms.Normalize(img_mean, img_std)
+    if tensorfy:
+        t = transforms.ToTensor()
+    tfms1 = [resize((h,w)), t, normalize]
+    tfms2 = [test_resize((h,w)), t, normalize]
+    tfms1 = transforms.Compose(tfms1)
+    tfms1.transforms.insert(1, extra)
+    tfms2 = transforms.Compose(tfms2)
+    return tfms1, tfms2
+
+# def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
+#     # t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0),
+#     #       albu.RandomBrightnessContrast(0.1, 0.1), albu.ShiftScaleRotate(0.03,0,0)]
+#     t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0), albu.ShiftScaleRotate(0.03,0,0)]
+#     t2 = list(instant_tfms(h, w, tensorfy, img_mean, img_std))
+#     return albu.Compose(t1+t2)
 
 def apply_tfms(img, tfms):
     try:
+        if is_array(img):
+            img = Image.fromarray(img)
         return tfms(img)
     except:
+        if is_pilimage(img):
+            img = np.array(img)
         return tfms(image=img)['image']
 
 def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,

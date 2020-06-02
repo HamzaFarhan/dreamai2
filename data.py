@@ -3,11 +3,13 @@ from .dai_imports import *
 
 class DaiDataset(Dataset):
     
-    def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
+    def __init__(self, data, ss_data=None, data_dir='', tfms=None, ss_tfms=None, channels=3, **kwargs):
         super(DaiDataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
+        self.ss_data = None
         self.tfms = tfms
+        self.ss_tfms = ss_tfms
         # if tfms is not None:
             # self.tfms = albu.Compose(tfms)
         # else:
@@ -39,9 +41,24 @@ class DaiDataset(Dataset):
                 x = x.unsqueeze(0)
         else:
             x = img
+        if self.ss_tfms is not None:
+            # try:
+            #     img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+            # except:
+            #     img_path = os.path.join(self.data_dir, self.data[index, 0])
+            # if self.channels == 3:
+            #     img = rgb_read(img_path)
+            # else:    
+            #     img = c1_read(img_path)
+            
+            x2 = apply_tfms(img, self.ss_tfms)
+            if self.channels == 1:
+                x2 = x2.unsqueeze(0)
+        else:
+            x2 = x
         if is_str(y) and hasattr(self, 'class_names'):
             y = self.class_names.index(y)
-        return x, y, self.data.iloc[index, 0]
+        return x, y, x2, self.data.iloc[index, 0]
 
     def get_at_index(self, index, denorm=True, show=True):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
@@ -65,13 +82,29 @@ class DaiDataset(Dataset):
                     x = denorm_img(x, mean, std)
         else:
             x = img
+        if self.ss_tfms is not None:
+            x2 = apply_tfms(img, self.ss_tfms)
+            if self.channels == 1:
+                x2 = x2.unsqueeze(0)
+            x2 = tensor_to_img(x2)
+            if denorm:
+                norm_t = get_norm(self.ss_tfms)
+                if norm_t:
+                    mean = norm_t.mean
+                    std = norm_t.std
+                    x2 = denorm_img(x2, mean, std)         
+        else:
+            x2 = x
+        
         # if 'float' in x.dtype.name:
             # x = img_float_to_int(x)
         p = self.data.iloc[index, 0]
         if show:
             print(f'path:{p}')
             plt_show(x, title=y)
-        return x, y, p
+            if self.ss_tfms is not None:
+                plt_show(x2, title=f'SS Augmented: {y}')
+        return x, y, x2, p
 
 class PredDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
@@ -132,10 +165,14 @@ class dai_classifier_dataset(Dataset):
             y = self.class_names.index(y)
         return x, y, self.data.iloc[index, 0]
 
-def get_classifier_dls(df, data_dir='', dset=DaiDataset, tfms=instant_tfms(224, 224),
+def get_classifier_dls(dfs, data_dir='', dset=DaiDataset, tfms=instant_tfms(224, 224), ss_tfms=None,
                        bs=64, shuffle=True, pin_memory=True, num_workers=4, force_one_hot=False,
                        class_names=None, split=True, val_size=0.2, test_size=0.15):
     
+    if is_list(dfs):
+        df = dfs[0]
+        if len(dfs) > 1:
+            ss_df = dfs[-1]
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
     if class_names is None:
@@ -144,6 +181,7 @@ def get_classifier_dls(df, data_dir='', dset=DaiDataset, tfms=instant_tfms(224, 
     stratify_idx = 1
     dfs = [df]
     transforms_ = [tfms[0]]
+    # ss_transforms = [ss_tfms[0]]
     if is_multi or force_one_hot:
         one_hot_labels = dai_one_hot(labels, class_names)    
         df['one_hot'] = list(one_hot_labels)
@@ -158,8 +196,10 @@ def get_classifier_dls(df, data_dir='', dset=DaiDataset, tfms=instant_tfms(224, 
             val_df, test_df = split_df(dfs[1], test_size, stratify_idx=stratify_idx)
             dfs = [dfs[0], val_df, test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
-
-    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
+    if ss_tfms is not None:
+        if is_list(ss_tfms) or is_tuple(ss_tfms): ss_tfms = ss_tfms[0]
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,
+                  ss_tfms=ss_tfms, class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)

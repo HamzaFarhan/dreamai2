@@ -1,13 +1,12 @@
 from .utils import *
-from .dai_imports import *
 from .plot_eval import *
-
+from .dai_imports import *
 
 models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
                resnet50: {'cut': -2, 'conv_channels': 2048},
                densenet121: {'cut': -1, 'conv_channels': 1024}}
 
-imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
 DEFAULTS = {'models_meta': models_meta, 'metrics': ['loss', 'accuracy', 'multi_accuracy'],
             'imagenet_stats': imagenet_stats, 'image_extensions': image_extensions}
@@ -39,9 +38,9 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     if bn_final: layers.append(nn.BatchNorm1d(lin_ftrs[-1], momentum=0.01))
     return nn.Sequential(*layers)
 
-def create_model(arch, num_classes):
+def create_model(arch, num_classes, num_extra=3):
     meta = models_meta[arch]
-    body = create_body(resnet34, meta['cut'])
+    body = create_body(arch, meta['cut'], num_extra=num_extra)
     head = create_head(meta['conv_channels']*2, num_classes)
     net = nn.Sequential(body, head)
     return net
@@ -157,7 +156,8 @@ class BasicModel(nn.Module):
         return self.body.parameters(), self.head.parameters()
 
 class DaiModel(nn.Module):
-    def __init__(self, model, opt, crit=nn.BCEWithLogitsLoss(), pred_thresh=0.5, device='cpu', checkpoint=None):
+    def __init__(self, model, opt, crit=nn.BCEWithLogitsLoss(), pred_thresh=0.5,
+                 device='cpu', checkpoint=None, load_opt=False):
         super().__init__()
         self.model = model.to(device)
         self.optimizer = opt
@@ -166,7 +166,7 @@ class DaiModel(nn.Module):
         self.pred_thresh = pred_thresh
 
         if checkpoint:
-            self.load_checkpoint(checkpoint)
+            self.load_checkpoint(checkpoint, load_opt=load_opt)
     
     def forward(self, x):
         return self.model(x)
@@ -203,11 +203,12 @@ class DaiModel(nn.Module):
     def ss_batch_to_loss(self, data_batch, backward_step=True, device=None):
         if device is None:
             device = self.device
-        img1, labels, img2 = data_batch[0], data_batch[1], data_batch[2]
+        img1, labels, img2, x2 = data_batch[0], data_batch[1], data_batch[2], data_batch[3]
         img1 = img1.to(device)
         img2 = img2.to(device)
+        x2 = x2.to(device)
         labels = labels.to(device)
-        ss_outputs = self.ss_forward(img1, img2)
+        ss_outputs = self.ss_forward(img2, x2)
         outputs = self.forward(img1)
         loss = self.compute_loss(outputs, labels)
         y = torch.ones(ss_outputs[0].shape[0]).to(device)
@@ -245,18 +246,28 @@ class DaiModel(nn.Module):
         ret['outputs'] = outputs
         if 'accuracy' in metric:
             self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
-
-        # if metric == 'accuracy':
-        #     kwargs['classifier'].update_accuracies(outputs, labels)
-        #     # try:
-        #         # y_true.extend(list(labels.squeeze(0).cpu().numpy()))
-        #         # _, preds = torch.max(torch.exp(outputs), 1)
-        #         # y_pred.extend(list(preds.cpu().numpy()))
-        #     # except:
-        #         # pass
-        # elif metric == 'multi_accuracy':
-        #     kwargs['classifier'].update_multi_accuracies(outputs, labels, self.pred_thresh)
         
+        return loss.item(), outputs
+
+    def val_ss_batch_to_loss(self, data_batch, metric='loss', **kwargs):
+        ret = {}
+        device = self.device
+        img1, labels, img2, x2 = data_batch[0], data_batch[1], data_batch[2], data_batch[3]
+        img1 = img1.to(device)
+        img2 = img2.to(device)
+        x2 = x2.to(device)
+        labels = labels.to(device)
+        ss_outputs = self.ss_forward(img2, x2)
+        outputs = self.forward(img1)
+        loss = self.compute_loss(outputs, labels)
+        y = torch.ones(ss_outputs[0].shape[0]).to(device)
+        l = torch.nn.CosineEmbeddingLoss()
+        ss_loss = l(*ss_outputs, y)
+        loss += ss_loss
+        ret['loss'] = loss.item()
+        ret['outputs'] = outputs
+        if 'accuracy' in metric:
+            self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
         return loss.item(), outputs
 
     def predict(self, x, actv=None, device=None):
@@ -303,18 +314,101 @@ class DaiModel(nn.Module):
         checkpoint = self.checkpoint_dict()
         torch.save(checkpoint, save_name)
 
-    def load_checkpoint(self, checkpoint):
+    def load_checkpoint(self, checkpoint, load_opt=True):
 
         if is_str(checkpoint) or is_path(checkpoint):
             checkpoint = torch.load(checkpoint)
         try:
             load_state_dict(self.model, checkpoint['model'])
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            if load_opt:
+                self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.model = self.model.to(self.device)
         except: pass
         for k in checkpoint.keys():
             if k not in ['model', 'optimizer']:
                 setattr(self, k, checkpoint[k])
+
+class SimilarityModel(DaiModel):
+    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device='cpu', checkpoint=None):
+        super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint)
+        # self.model = model.to(device)
+        # self.optimizer = opt
+        # self.device = device
+        # self.criterion = crit
+        # self.pred_thresh = pred_thresh
+
+        # if checkpoint:
+        #     self.load_checkpoint(checkpoint)
+    
+    def forward(self, x1, x2):
+        return self.model(x1), self.model(x2)
+    
+    # def forward(self, x1, x2):
+        # ftrs = torch.cat([self.model.encoder(x1), self.model.encoder(x2)], dim=1)
+        # return self.model.head(ftrs)
+    
+    def compute_loss(self, outputs, y):
+        return self.criterion(outputs, y)
+    
+    def process_batch(self, data_batch):
+        inputs,labels = data_batch[0], data_batch[1]
+        inputs = inputs.to(self.device)
+        labels = labels.to(self.device)
+        outputs = self.forward(inputs)
+        return outputs
+
+    def batch_to_loss(self, data_batch, backward_step=True, device=None):
+        if device is None:
+            device = self.device
+        img1,img2 = data_batch[0], data_batch[1]
+        img1 = img1.to(device)
+        img2 = img2.to(device)
+        outputs = self.forward(img1, img2)
+        y = torch.ones(ss_outputs[0][0].shape[0]).to(device)
+        loss = self.compute_loss(*outputs, y)
+        if backward_step:
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+        ret = {'loss': loss.item(), 'outputs': outputs}
+        return loss.item(), outputs
+
+    def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
+        ret = {}
+        img1,img2 = data_batch[0], data_batch[1]
+        img1 = img1.to(device)
+        img2 = img2.to(device)
+        outputs = self.forward(img1, img2)
+        y = torch.ones(ss_outputs[0][0].shape[0]).to(device)
+        loss = self.compute_loss(*outputs, y)
+        ret['loss'] = loss.item()
+        ret['outputs'] = outputs
+        if 'accuracy' in metric:
+            self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
+        
+        return loss.item(), outputs
+
+    def predict(self, x, actv=None, device=None):
+
+        if device is None:
+            device = self.device
+    
+        self.eval()
+        self.model.eval()
+        self.model = self.model.to(device)
+        with torch.no_grad():
+            # print(x.shape)
+            if is_tensor(x):
+                if x.dim() == 3:
+                    x.unsqueeze_(0)
+            elif is_array(x):
+                x = to_tensor(x).unsqueeze(0)
+                # print(x)
+            x = x.to(device)
+            outputs = self.forward(x)
+        if actv is not None:
+            return actv(outputs)
+        return outputs
 
 class ConfusionMatrix():
     def __init__(self, matrix, class_names):

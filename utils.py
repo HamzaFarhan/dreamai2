@@ -1,3 +1,5 @@
+from .lars import LARS
+from .larc import LARC
 from .dai_imports import *
 from .randaug import RandAugment
 
@@ -183,12 +185,13 @@ def smooth_labels(labels,eps=0.1):
 def df_classes(df):
     return np.unique(flatten_list([str(x).split() for x in list(df.iloc[:,1])]))
 
-def split_df(train_df, test_size=0.15, stratify_idx=1):
+def split_df(train_df, test_size=0.15, stratify_idx=1, seed=2):
     try:    
-        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,stratify_idx])
+        train_df,val_df = train_test_split(train_df, test_size=test_size,
+                                           random_state=seed, stratify=train_df.iloc[:,stratify_idx])
     except:
         print('Not stratified.')
-        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2)
+        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=seed)
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)
     return train_df,val_df  
@@ -247,6 +250,15 @@ def remove_key(d, x):
         if x in k:
             del d[k]
 
+def split_params(model, n=3):
+    return list_map(np.array_split(params(model), n), list)
+
+def is_lars(x):
+    return isinstance(x, LARS)
+
+def is_larc(x):
+    return isinstance(x, LARC)
+
 def is_cuda(model):
     return next(model.parameters()).is_cuda
 
@@ -255,6 +267,9 @@ def is_list(x):
 
 def is_tuple(x):
     return isinstance(x, tuple)
+
+def list_or_tuple(x):
+    return (is_list(x) or is_tuple(x))
 
 def is_df(x):
     return isinstance(x, pd.core.frame.DataFrame)
@@ -290,6 +305,19 @@ def get_norm(tfms):
             return t
     return False
 
+def is_resize(x):
+    return ('Resize' in type(x).__name__) or ('resize' in type(x).__name__)
+
+def get_resize(tfms):
+    try:
+        tfms_list = list(tfms)
+    except:
+        tfms_list = list(tfms.transforms)
+    for t in tfms_list:
+        if is_resize(t):
+            return t
+    return False
+
 def has_norm(tfms):
     tfms_list = list(tfms)
     for t in tfms_list:
@@ -318,10 +346,12 @@ def load_state_dict(model, sd, strict=True, eval=True):
         model.eval()
 
 def set_lr(opt, lr):
-    opt.param_groups[0]['lr'] = lr
+    # opt.param_groups[0]['lr'] = lr
+    opt.param_groups[-1]['lr'] = lr
 
 def get_lr(opt):
-    return opt.param_groups[0]['lr']
+    # return opt.param_groups[0]['lr']
+    return opt.param_groups[-1]['lr']
 
 def get_optim(optimizer_name,params,lr):
     if optimizer_name.lower() == 'adam':
@@ -404,7 +434,7 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
     tfms2 = albu.Compose(tfms2)
     return tfms1, tfms2
 
-def semi_sup_tfms(tfms1, tfms2):
+def jigsaw_tfms(tfms1, tfms2):
     tfms = copy.deepcopy(tfms1)
     # tfms.transforms.transforms.insert(0, albu.RandomGridShuffle(p=1.))
     tfms.transforms.transforms.insert(-2, albu.RandomGridShuffle(p=1.))

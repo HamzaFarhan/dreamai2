@@ -85,7 +85,8 @@ class DaiDataset(Dataset):
             x2 = x
         if is_str(y) and hasattr(self, 'class_names'):
             y = self.class_names.index(y)
-        return x, y, img2, x2, self.data.iloc[index, 0]
+        return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
+        # return x, y, img2, x2, self.data.iloc[index, 0]
 
     def get_at_index(self, index, denorm=True, show=True):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
@@ -169,7 +170,8 @@ class DaiDataset(Dataset):
             if self.ss_tfms is not None:
                 plt_show(img2, title=f'SS Image: {y}')
                 plt_show(x2, title=f'SS Augmented: {y}')
-        return x, y, img2, x2, p
+                
+        return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
 class PredDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):

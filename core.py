@@ -144,6 +144,36 @@ class Classifier():
                                  for i in range(len(self.class_names)) if self.class_totals[i] > 0]
         return accuracy, class_accuracies
 
+class ConfusionMatrix():
+    def __init__(self, matrix, class_names):
+        self.matrix = matrix
+        self.class_names = class_names
+
+    def show(self, figsize=[8,8]):
+        plot_confusion_matrix(self.matrix, self.class_names, figsize=figsize)
+
+class ClassificationReport():
+    def __init__(self, report, accuracy, class_accuracies):
+        self.str_report = report
+
+        split = report.split('\n')
+        scores = [x for x in split[0].split(' ') if len(x)>0]
+        report = {}
+        report['Overall Accuracy'] = accuracy
+        l = list_map(split[2:-5], lambda x:x.split())
+        class_names = [x[0] for x in l]
+        vals = [x[1:] for x in l]
+        for i,val in enumerate(vals):
+            scores_dict = {}
+            for j,s in enumerate(val):
+                scores_dict[scores[j]] = float(s)
+            scores_dict['accuracy'] = class_accuracies[i][1]
+            report[class_names[i]] = scores_dict
+        self.report = report
+
+    def show(self):
+        plot_classification_report(self.str_report)
+
 class BasicModel(nn.Module):
     def __init__(self, body, head):
         super().__init__()
@@ -329,8 +359,8 @@ class DaiModel(nn.Module):
                 setattr(self, k, checkpoint[k])
 
 class SimilarityModel(DaiModel):
-    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device='cpu', checkpoint=None):
-        super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint)
+    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device='cpu', checkpoint=None, load_opt=False):
+        super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt)
         # self.model = model.to(device)
         # self.optimizer = opt
         # self.device = device
@@ -410,32 +440,3 @@ class SimilarityModel(DaiModel):
             return actv(outputs)
         return outputs
 
-class ConfusionMatrix():
-    def __init__(self, matrix, class_names):
-        self.matrix = matrix
-        self.class_names = class_names
-
-    def show(self, figsize=[8,8]):
-        plot_confusion_matrix(self.matrix, self.class_names, figsize=figsize)
-
-class ClassificationReport():
-    def __init__(self, report, accuracy, class_accuracies):
-        self.str_report = report
-
-        split = report.split('\n')
-        scores = [x for x in split[0].split(' ') if len(x)>0]
-        report = {}
-        report['Overall Accuracy'] = accuracy
-        l = list_map(split[2:-5], lambda x:x.split())
-        class_names = [x[0] for x in l]
-        vals = [x[1:] for x in l]
-        for i,val in enumerate(vals):
-            scores_dict = {}
-            for j,s in enumerate(val):
-                scores_dict[scores[j]] = float(s)
-            scores_dict['accuracy'] = class_accuracies[i][1]
-            report[class_names[i]] = scores_dict
-        self.report = report
-
-    def show(self):
-        plot_classification_report(self.str_report)

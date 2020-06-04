@@ -5,9 +5,9 @@ class DaiDataset(Dataset):
     
     def __init__(self, data, ss_data=None, data_dir='', tfms=None, ss_tfms=None, channels=3, **kwargs):
         super(DaiDataset, self).__init__()
-        self.data_dir = data_dir
+        self.data_dir = str(data_dir)
         self.data = data
-        self.ss_data = None
+        self.ss_data = ss_data
         self.tfms = tfms
         self.ss_tfms = ss_tfms
         # if tfms is not None:
@@ -35,30 +35,58 @@ class DaiDataset(Dataset):
         except:
             y = self.data[index, 1]
         if self.tfms is not None:
-            x = apply_tfms(img, self.tfms)
+            x = apply_tfms(img.copy(), self.tfms)
             # x = self.tfms(image=img)['image']
             if self.channels == 1:
                 x = x.unsqueeze(0)
         else:
             x = img
         if self.ss_tfms is not None:
-            # try:
-            #     img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
-            # except:
-            #     img_path = os.path.join(self.data_dir, self.data[index, 0])
-            # if self.channels == 3:
-            #     img = rgb_read(img_path)
-            # else:    
-            #     img = c1_read(img_path)
-            
-            x2 = apply_tfms(img, self.ss_tfms)
+            # if self.ss_data is not None:
+            #     try:
+            #         img_path = os.path.join(self.data_dir, self.ss_data.iloc[index, 0])
+            #     except:
+            #         img_path = os.path.join(self.data_dir, self.ss_data[index, 0])
+            #     if self.channels == 3:
+            #         img = rgb_read(img_path)
+            #     else:    
+            #         img = c1_read(img_path)
+
+            # x2 = apply_tfms(img, self.ss_tfms)
+            # if self.channels == 1:
+            #     x2 = x2.unsqueeze(0)
+            index = random.choice(range(len(self.data)))
+            try:
+                img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+            except:
+                img_path = os.path.join(self.data_dir, self.data[index, 0])
+            if self.channels == 3:
+                img2 = rgb_read(img_path)
+            else:    
+                img2 = c1_read(img_path)
+            x2 = apply_tfms(img2.copy(), self.ss_tfms)
             if self.channels == 1:
                 x2 = x2.unsqueeze(0)
+            norm_t = get_norm(self.tfms)
+            if norm_t:
+                mean = norm_t.mean
+                std = norm_t.std
+            else:
+                std = None
+                mean = None
+            resize_t = list(self.tfms)[0]
+            h,w = resize_t.height, resize_t.width
+            img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
+            img2 = apply_tfms(img2, img2_tfms)
+            if self.channels == 1:
+                img2 = img2.unsqueeze(0)
         else:
+            img2 = x
             x2 = x
         if is_str(y) and hasattr(self, 'class_names'):
             y = self.class_names.index(y)
-        return x, y, x2, self.data.iloc[index, 0]
+        return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
+        # return x, y, img2, x2, self.data.iloc[index, 0]
 
     def get_at_index(self, index, denorm=True, show=True):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
@@ -69,7 +97,7 @@ class DaiDataset(Dataset):
             
         y = self.data.iloc[index, 1]
         if self.tfms is not None:
-            x = apply_tfms(img, self.tfms)
+            x = apply_tfms(img.copy(), self.tfms)
             # x = (self.tfms(image=img)['image'])
             if self.channels == 1:
                 x = x.unsqueeze(0)
@@ -83,32 +111,71 @@ class DaiDataset(Dataset):
         else:
             x = img
         if self.ss_tfms is not None:
-            x2 = apply_tfms(img, self.ss_tfms)
+            # if self.ss_data is not None:
+            #     try:
+            #         img_path = os.path.join(self.data_dir, self.ss_data.iloc[index, 0])
+            #     except:
+            #         img_path = os.path.join(self.data_dir, self.ss_data[index, 0])
+            #     if self.channels == 3:
+            #         img = rgb_read(img_path)
+            #     else:    
+            #         img = c1_read(img_path)
+            index = random.choice(range(len(self.data)))
+            try:
+                img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+            except:
+                img_path = os.path.join(self.data_dir, self.data[index, 0])
+            if self.channels == 3:
+                img2 = rgb_read(img_path)
+            else:    
+                img2 = c1_read(img_path)
+            x2 = apply_tfms(img2.copy(), self.ss_tfms)
             if self.channels == 1:
                 x2 = x2.unsqueeze(0)
             x2 = tensor_to_img(x2)
+            norm_t = get_norm(self.tfms)
+            if norm_t:
+                mean = norm_t.mean
+                std = norm_t.std
+            else:
+                std = None
+                mean = None
+            resize_t = list(self.tfms)[0]
+            h,w = resize_t.height, resize_t.width
+            img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
+            img2 = apply_tfms(img2, img2_tfms)
+            if self.channels == 1:
+                img2 = img2.unsqueeze(0)
+            img2 = tensor_to_img(img2)
             if denorm:
-                norm_t = get_norm(self.ss_tfms)
-                if norm_t:
-                    mean = norm_t.mean
-                    std = norm_t.std
-                    x2 = denorm_img(x2, mean, std)         
+                # norm_t = get_norm(self.ss_tfms)
+                # if norm_t:
+                    # mean = norm_t.mean
+                    # std = norm_t.std
+                img2 = denorm_img(img2, mean, std)
+                x2 = denorm_img(x2, mean, std)
         else:
             x2 = x
+            img2 = x
         
         # if 'float' in x.dtype.name:
             # x = img_float_to_int(x)
         p = self.data.iloc[index, 0]
         if show:
             print(f'path:{p}')
-            plt_show(x, title=y)
+            if self.tfms is None:
+                aug = ''
+            else: aug = ' Augmented'
+            plt_show(x, title=f'Normal{aug}: {y}')
             if self.ss_tfms is not None:
+                plt_show(img2, title=f'SS Image: {y}')
                 plt_show(x2, title=f'SS Augmented: {y}')
-        return x, y, x2, p
+                
+        return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
 class PredDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
-        super(Dataset, self).__init__()
+        super(PredDataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
         self.tfms = tfms
@@ -169,10 +236,13 @@ def get_classifier_dls(dfs, data_dir='', dset=DaiDataset, tfms=instant_tfms(224,
                        bs=64, shuffle=True, pin_memory=True, num_workers=4, force_one_hot=False,
                        class_names=None, split=True, val_size=0.2, test_size=0.15):
     
-    if is_list(dfs):
+    if list_or_tuple(dfs):
         df = dfs[0]
         if len(dfs) > 1:
             ss_df = dfs[-1]
+    else:
+        df = dfs
+        ss_df = None
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
     if class_names is None:
@@ -197,8 +267,8 @@ def get_classifier_dls(dfs, data_dir='', dset=DaiDataset, tfms=instant_tfms(224,
             dfs = [dfs[0], val_df, test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
     if ss_tfms is not None:
-        if is_list(ss_tfms) or is_tuple(ss_tfms): ss_tfms = ss_tfms[0]
-    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,
+        if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
+    dsets = [dset(data_dir=data_dir, data=df, ss_data=ss_df, tfms=tfms_,
                   ss_tfms=ss_tfms, class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
@@ -256,13 +326,13 @@ def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True):
         # dl.suggested_crit = None
     return dls
 
-def get_data_stats(df, image_size=224, stats_percentage=0.7, bs=32):
+def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32):
     
     print('Calculating dataset mean and std. This may take a while.', end='')
     frac_data = df.sample(frac=stats_percentage).reset_index(drop=True).copy()
     tfms = instant_tfms(image_size, image_size)[1]
-    dset = DaiDataset(frac_data, tfms=tfms)
-    dl = DataLoader(dset, batch_size=32)
+    dset = DaiDataset(frac_data, data_dir=data_dir, tfms=tfms)
+    dl = DataLoader(dset, batch_size=bs)
     print('.', end='')
     mean = 0.0
     for data_batch in dl:

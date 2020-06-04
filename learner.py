@@ -43,7 +43,8 @@ class Callback(GetAttr):
     def after_predict(self): pass
 
 class CheckpointCallback(Callback):
-    def __init__(self, metric='loss', curr_best=None, save_every=1, save_name='model_checkpoint'):
+    def __init__(self, metric='loss', curr_best=None, save_every=1,
+                 save_name='model_checkpoint'):
 
         self.save_metric = metric
         self.save_every = save_every
@@ -65,13 +66,22 @@ class CheckpointCallback(Callback):
             return curr <= best
         return curr >= best
 
-    # def before_fit(self):
-        # self.curr_best = None
+    def before_fit(self):
+        self.not_imporoved = 0
 
     def after_valid(self):
         if (self.curr_epoch+1) % self.save_every == 0:
-            curr_metric = self.val_ret[self.save_metric]
+            if self.save_class is not None:
+                class_acc = self.val_ret['class_accuracies']
+                for ca in class_acc:
+                    if self.save_class in ca:
+                        curr_metric = ca[1]
+                        # print(ca)
+                        break
+            else:
+                curr_metric = self.val_ret[self.save_metric]
             if self.checker(curr_metric, self.curr_best, self.save_metric):
+                self.not_improved = 0
                 top = f'\n**********Updating best {self.save_metric}**********\n'
                 print(top)
                 print(f'Previous best: {self.curr_best:.3f}')
@@ -88,7 +98,13 @@ class CheckpointCallback(Callback):
                 #             'optimizer': self.model.optimizer.state_dict(),
                 #             self.save_metric: self.curr_best
                 #             }, self.save_name)
-    
+            elif self.early_stopping_epochs is not None:
+                self.not_improved += 1
+                if self.not_improved >= self.early_stopping_epochs:
+                    self.learner.do_training = False
+                    print('+----------------------------------------------------------------------+')
+                    print(' Early Stopping.')
+                    print('+----------------------------------------------------------------------+')
     def after_fit(self):
         checkpoint = torch.load(self.save_name)
         self.learner.checkpoint = checkpoint
@@ -163,11 +179,26 @@ class BasicCallback(Callback):
         if self.learn_metric == 'multi_accuracy':
             p = nn.Sigmoid()(self.pred_out).cpu()[0]
             bools = (p >= self.pred_thresh)
-            print(bools)
+            # print(bools)
             c = np.array(self.dls.class_names)[bools]
             self.learner.pred_out = {'probs': p, 'bools':bools, 'pred': c}
         # if 'accuracy' in self.learn_metric:
 
+def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):
+
+    # Scaler: we can adapt this if we do not want the triangular CLR
+    scaler = lambda x: 1.
+
+    # Lambda function to calculate the LR
+    lr_lambda = lambda it: min_lr + (max_lr - min_lr) * relative(it, stepsize)
+
+    # Additional function to see where on the cycle we are
+    def relative(it, stepsize):
+        cycle = math.floor(1 + it / (2 * stepsize))
+        x = abs(it / stepsize - 2 * cycle + 1)
+        return max(0, (1 - x)) * scaler(cycle)
+
+    return lr_lambda
 
 class Learner:
     def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()]):
@@ -179,6 +210,7 @@ class Learner:
         self.model.denorm = dls.denorm
         self.model.img_mean = dls.img_mean
         self.model.img_std = dls.img_std
+        self.is_frozen = False
         assert len(cbs) > 0, print('Please pass some callbacks for training.')
     
     def print_train_progress(self, progress={}):
@@ -215,7 +247,8 @@ class Learner:
 
             print('+----------------------------------------------------------------------+')
             print(f" {time.asctime().split()[-2]}")
-            print(f" Time elapsed: {elapsed:.3f}{measure} / {total_time:.3f}{total_measure}")
+            # print(f" Time elapsed: {elapsed:.3f}{measure} / {total_time:.3f}{total_measure}")
+            print(f" Time elapsed: {elapsed:.3f} {measure}")
             print(f" Epoch:{self.curr_epoch+1}/{self.fit_epochs}")
             print(f" Batch: {self.batch_num+1}/{self.num_batches}")
             print(f" Batch training time: {batch_time:.3f} {measure2}")
@@ -269,6 +302,9 @@ class Learner:
             self.tr_batch_loss = self.model.ss_batch_to_loss(self.data_batch)[0]
         else:
             self.tr_batch_loss = self.model.batch_to_loss(self.data_batch)[0]
+        if self.fit_scheduler is not None:
+            self.fit_scheduler.step()
+            # print(get_lr(self.model.optimizer))
         self('after_train_batch')
     
     def val_batch(self):
@@ -296,7 +332,8 @@ class Learner:
         self('after_val_epoch')
         self.print_valid_progress()
     
-    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, load_best=True, semi_sup=False):
+    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1,
+            load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
@@ -304,13 +341,45 @@ class Learner:
         self.fit_validate_every = validate_every
         self.load_best = load_best
         self.semi_sup = semi_sup
-        
-        if lr:
-            set_lr(self.model.optimizer, lr)
+        self.early_stopping_epochs = early_stopping_epochs
+        self.do_training = True
+        self.fit_scheduler = None
+        self.save_class = save_class
+        # if (cycle_len > 1) and (cycle_len%2 == 0):
+        if cycle_len > 0:
+            cyclic_step = int((cycle_len/2)*len(self.dls.train))
+            factor = 6
+            set_lr(self.model.optimizer, 1.)
+            end_lr = self.find_clr(self.dls.train, plot=False)
+            clr = cyclical_lr(cyclic_step, min_lr=end_lr/factor, max_lr=end_lr)
+            scheduler = optim.lr_scheduler.LambdaLR(self.model.optimizer, [clr])
+            self.fit_scheduler = scheduler
+        elif lr is not None:
+            if list_or_tuple(lr):
+                lrs = lr
+                if len(self.model.optimizer.param_groups) == len(lrs):
+                    for i in range(len(self.model.optimizer.param_groups)):
+                        self.model.optimizer.param_groups[i]['lr'] = lrs[i]
+                else:
+                    del self.model.optimizer.param_groups[:]
+                    if self.model_splitter is not None:
+                        p = self.model_splitter(self.model.model)
+                    if len(lrs) != len(p):
+                        p = split_params(self.model.model, len(lrs))
+                    for param,lr_ in zip(p,lrs):
+                        p_group = {'params': param, 'lr': lr_}
+                        self.model.optimizer.add_param_group(p_group)
+            else:
+                set_lr(self.model.optimizer, lr)
+
+        if is_lars(self.model.optimizer):
+            self.model.optimizer.epoch = 0
+            self.model.optimizer.param_groups[0]['max_epoch'] = epochs
 
         self('before_fit')
         for self.curr_epoch in range(epochs):
-            
+            if not self.do_training:
+                break
             self('before_training')
             self.train_epoch()
             self('after_training')
@@ -435,36 +504,43 @@ class Learner:
 
     def freeze(self):
         if self.model_splitter:
-            freeze_params(params(self.model))
-            p1,p2 = self.model_splitter(self.model)
+            freeze_params(params(self.model.model))
+            p1,p2 = self.model_splitter(self.model.model)
             # freeze_params(p1)
             unfreeze_params(p2)
         
         else:
             self.model.freeze()
+        self.is_frozen = True
     
     def unfreeze(self):
         self.model.unfreeze()
+        self.is_frozen = False
         # unfreeze_params(self.model.parameters())
 
 
-    def fine_tune(self, frozen_epochs=2, unfrozen_epochs=5, frozen_lr=0.001, unfrozen_lr=0.001,
-                  metric='loss', load_best_frozen=False, semi_sup=False,
-                  print_every=3, validate_every=1, load_best=True):
+    def fine_tune(self, frozen_epochs=12, unfrozen_epochs=30, frozen_lr=None, unfrozen_lr=None,
+                  metric='loss', load_best_frozen=False, semi_sup=False, early_stopping_epochs=None,
+                  print_every=3, validate_every=1, load_best=True, cycle_len=0, save_class=None):
 
+        if list_or_tuple(cycle_len):
+            len1,len2 = cycle_len[0], cycle_len[1]
+        else:
+            len1,len2 = cycle_len, cycle_len
         print(f'+{"-"*10}+')
         print(f'+  FROZEN  +')
         print(f'+{"-"*10}+')
         self.freeze()
         self.fit(frozen_epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen, semi_sup=semi_sup,
-                 print_every=print_every, validate_every=validate_every)
+                 print_every=print_every, validate_every=validate_every, cycle_len=len1, save_class=save_class)
         print()
         print(f'+{"-"*10}+')
         print(f'+ UNFROZEN +')
         print(f'+{"-"*10}+')
         self.unfreeze()
         self.fit(unfrozen_epochs, lr=unfrozen_lr, metric=metric, load_best=load_best, semi_sup=semi_sup,
-                 print_every=print_every, validate_every=validate_every)
+                 print_every=print_every, validate_every=validate_every, early_stopping_epochs=early_stopping_epochs,
+                 cycle_len=len2, save_class=save_class)
 
     def find_lr(self, dl=None, init_value=1e-8, final_value=10., beta=0.98, plot=False):
 
@@ -472,6 +548,7 @@ class Learner:
 
         model_state = copy.deepcopy(self.model.state_dict())
         optim_state = copy.deepcopy(self.model.optimizer.state_dict())
+        self.model.train()
         optimizer = self.model.optimizer
         if dl is None:
             dl = self.dls.train
@@ -495,6 +572,7 @@ class Learner:
                 self.log_lrs, self.find_lr_losses = log_lrs,losses
                 self.model.load_state_dict(model_state)
                 self.model.optimizer.load_state_dict(optim_state)
+                self.model.eval()
                 if plot:
                     self.plot_find_lr()
                 temp_lr = self.log_lrs[np.argmin(self.find_lr_losses)-(len(self.log_lrs)//7)]
@@ -514,6 +592,7 @@ class Learner:
         self.log_lrs, self.find_lr_losses = log_lrs,losses
         self.model.load_state_dict(model_state)
         self.model.optimizer.load_state_dict(optim_state)
+        self.model.eval()
         if plot:
             self.plot_find_lr()
         temp_lr = self.log_lrs[np.argmin(self.find_lr_losses)-(len(self.log_lrs)//10)]
@@ -525,6 +604,69 @@ class Learner:
         plt.ylabel("Loss")
         plt.xlabel("Learning Rate (log scale)")
         plt.plot(self.log_lrs,self.find_lr_losses)
+        plt.show()
+
+    def find_clr(self, dl=None, start_lr=1e-7, end_lr=1., lr_find_epochs=1, plot=True):
+
+        print('\nFinding the ideal max cyclic learning rate.')
+
+        model_state = copy.deepcopy(self.model.state_dict())
+        optim_state = copy.deepcopy(self.model.optimizer.state_dict())
+        optimizer = self.model.optimizer
+        set_lr(optimizer, start_lr)
+        self.model.train()
+        if dl is None:
+            dl = self.dls.train
+        lr_lambda = lambda x: math.exp(x * math.log(end_lr/start_lr) / (lr_find_epochs*len(dl)))
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        lr_find_loss = []
+        lr_find_lr = []
+        iter = 0
+        smoothing = 0.06
+        best_loss = 100.
+        last_lr = start_lr
+        best_lr = 0.01
+        for i in range(lr_find_epochs):
+            if lr_find_epochs > 1:
+                print("Epoch: {}".format(i+1))
+            for data_batch in dl:
+                loss = self.model.batch_to_loss(data_batch)[0]
+                scheduler.step()
+                if iter >= min(3,(len(dl)//8)):
+                    if loss <= best_loss:
+                        best_loss = loss
+                        best_lr = last_lr*0.1
+                        # best_lr = last_lr
+                    elif loss >= 4*best_loss:
+                        self.model.load_state_dict(model_state)
+                        self.model.optimizer.load_state_dict(optim_state)
+                        self.model.eval()
+                        if plot:
+                            self.plot_find_clr(lr_find_lr, lr_find_loss)
+                        print(f'Found it: {best_lr}\n')
+                        return best_lr
+                if iter!=0:
+                    loss = smoothing  * loss + (1 - smoothing) * lr_find_loss[-1]
+                    # print(loss, last_lr)
+                lr_step = optimizer.state_dict()["param_groups"][0]["lr"]
+                lr_find_lr.append(lr_step)
+                last_lr = lr_step
+                lr_find_loss.append(loss)
+                iter += 1
+        
+        self.model.load_state_dict(model_state)
+        self.model.optimizer.load_state_dict(optim_state)
+        self.model.eval()
+        if plot:
+            self.plot_find_clr(lr_find_lr, lr_find_loss)
+        print(f'Found it: {best_lr}\n')
+        return best_lr
+
+    def plot_find_clr(self, lr_find_lr, lr_find_loss):
+        plt.ylabel("loss")
+        plt.xlabel("lr")
+        plt.xscale("linear")
+        plt.plot(lr_find_lr, lr_find_loss)
         plt.show()
 
     def __call__(self,name):

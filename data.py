@@ -3,13 +3,13 @@ from .dai_imports import *
 
 class DaiDataset(Dataset):
     
-    def __init__(self, data, ss_data=None, data_dir='', tfms=None, ss_tfms=None, channels=3, **kwargs):
+    def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3, meta_idx=None, **kwargs):
         super(DaiDataset, self).__init__()
         self.data_dir = str(data_dir)
         self.data = data
-        self.ss_data = ss_data
         self.tfms = tfms
         self.ss_tfms = ss_tfms
+        self.meta_idx = meta_idx
         # if tfms is not None:
             # self.tfms = albu.Compose(tfms)
         # else:
@@ -26,6 +26,8 @@ class DaiDataset(Dataset):
             img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
         except:
             img_path = os.path.join(self.data_dir, self.data[index, 0])
+        # if not Path(img_path).exists():
+        #print(img_path)
         if self.channels == 3:
             img = rgb_read(img_path)
         else:    
@@ -41,6 +43,9 @@ class DaiDataset(Dataset):
                 x = x.unsqueeze(0)
         else:
             x = img
+        if is_str(y) and hasattr(self, 'class_names'):
+            y = self.class_names.index(y)
+        ret = {'x':x, 'label':y, 'path':self.data.iloc[index, 0]}
         if self.ss_tfms is not None:
             # if self.ss_data is not None:
             #     try:
@@ -80,12 +85,20 @@ class DaiDataset(Dataset):
             img2 = apply_tfms(img2, img2_tfms)
             if self.channels == 1:
                 img2 = img2.unsqueeze(0)
-        else:
-            img2 = x
-            x2 = x
-        if is_str(y) and hasattr(self, 'class_names'):
-            y = self.class_names.index(y)
-        return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
+            
+            ret = {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
+        # else:
+            # img2 = x
+            # x2 = x
+        if self.meta_idx is not None:
+            if not list_or_tuple(self.meta_idx):
+                meta1,meta2 = self.meta_idx, self.meta_idx+1
+            else:
+                meta1,meta2 = self.meta_idx
+            ret['meta'] = self.data.iloc[index, meta1:meta2]
+
+        return ret
+        # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
         # return x, y, img2, x2, self.data.iloc[index, 0]
 
     def get_at_index(self, index, denorm=True, show=True):
@@ -94,8 +107,12 @@ class DaiDataset(Dataset):
             img = rgb_read(img_path)
         else:    
             img = c1_read(img_path)
-            
+        
         y = self.data.iloc[index, 1]
+        if not is_str(y):
+            label = self.data.iloc[index, 2]
+        else:
+            label = y
         if self.tfms is not None:
             x = apply_tfms(img.copy(), self.tfms)
             # x = (self.tfms(image=img)['image'])
@@ -110,6 +127,10 @@ class DaiDataset(Dataset):
                     x = denorm_img(x, mean, std)
         else:
             x = img
+        p = self.data.iloc[index, 0]
+
+        ret = {'x':x, 'label':y, 'path':p}
+
         if self.ss_tfms is not None:
             # if self.ss_data is not None:
             #     try:
@@ -154,24 +175,31 @@ class DaiDataset(Dataset):
                     # std = norm_t.std
                 img2 = denorm_img(img2, mean, std)
                 x2 = denorm_img(x2, mean, std)
-        else:
-            x2 = x
-            img2 = x
-        
-        # if 'float' in x.dtype.name:
-            # x = img_float_to_int(x)
-        p = self.data.iloc[index, 0]
+            
+            ret = {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
+        # else:
+            # x2 = x
+            # img2 = x
+                
         if show:
             print(f'path:{p}')
             if self.tfms is None:
                 aug = ''
             else: aug = ' Augmented'
-            plt_show(x, title=f'Normal{aug}: {y}')
+            plt_show(x, title=f'Normal{aug}: {label}')
             if self.ss_tfms is not None:
-                plt_show(img2, title=f'SS Image: {y}')
-                plt_show(x2, title=f'SS Augmented: {y}')
-                
-        return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
+                plt_show(img2, title=f'SS Image: {label}')
+                plt_show(x2, title=f'SS Augmented: {label}')
+
+        if self.meta_idx is not None:
+            if not list_or_tuple(self.meta_idx):
+                meta1,meta2 = self.meta_idx, self.meta_idx+1
+            else:
+                meta1,meta2 = self.meta_idx
+            ret['meta'] = self.data.iloc[index, meta1:meta2]
+
+        return ret
+        # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
 class PredDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
@@ -232,50 +260,74 @@ class dai_classifier_dataset(Dataset):
             y = self.class_names.index(y)
         return x, y, self.data.iloc[index, 0]
 
-def get_classifier_dls(dfs, data_dir='', dset=DaiDataset, tfms=instant_tfms(224, 224), ss_tfms=None,
-                       bs=64, shuffle=True, pin_memory=True, num_workers=4, force_one_hot=False,
+def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
+                       tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
+                       pin_memory=True, num_workers=4, force_one_hot=False, meta=False,
                        class_names=None, split=True, val_size=0.2, test_size=0.15):
     
-    if list_or_tuple(dfs):
-        df = dfs[0]
-        if len(dfs) > 1:
-            ss_df = dfs[-1]
-    else:
-        df = dfs
-        ss_df = None
+    # if list_or_tuple(dfs):
+    #     df = dfs[0]
+    #     if len(dfs) > 1:
+    #         other_dfs = dfs[1:]
+    #         # ss_df = dfs[-1]
+    # else:
+    #     df = dfs
+    #     other_dfs = []
+    #     # ss_df = None
+    def df_one_hot(df):
+        df = df.copy()
+        labels = list_map(df.iloc[:,1], lambda x:str(x).split())
+        one_hot_labels = dai_one_hot(labels, class_names)
+        df['one_hot'] = list(one_hot_labels)
+        cols = df.columns.to_list()
+        df = df[[cols[0], cols[-1], *cols[1:-1]]]
+        return df
+
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
     if class_names is None:
         class_names = np.unique(flatten_list(labels))
     class_names = list_map(class_names, str)
     stratify_idx = 1
-    dfs = [df]
-    transforms_ = [tfms[0]]
     # ss_transforms = [ss_tfms[0]]
     if is_multi or force_one_hot:
-        one_hot_labels = dai_one_hot(labels, class_names)    
-        df['one_hot'] = list(one_hot_labels)
-        cols = df.columns.to_list()
-        df = df[[cols[0], cols[-1], *cols[1:-1]]]
-        dfs = [df]
+        # one_hot_labels = dai_one_hot(labels, class_names)    
+        dfs = [df, val_df, test_df]
+        for i in range(3):
+            if dfs[i] is not None:
+                dfs[i] = df_one_hot(dfs[i])
+        df, val_df, test_df = dfs
+        # df['one_hot'] = list(one_hot_labels)
+        # cols = df.columns.to_list()
+        # df = df[[cols[0], cols[-1], *cols[1:-1]]]
         stratify_idx = 2
+    dfs = [df]
+    transforms_ = [tfms[0]]
     if split:
-        dfs = split_df(df, val_size, stratify_idx=stratify_idx)
-        transforms_ = [tfms[0], tfms[1]]
-        if test_size > 0:
+        if val_df is None:
+            dfs = list(split_df(df, val_size, stratify_idx=stratify_idx))
+            transforms_ = [tfms[0], tfms[1]]
+        elif val_df is not None:
+            dfs+=[val_df]
+            transforms_ = [tfms[0], tfms[1]]
+        if (test_size > 0) and (test_df is None):
             val_df, test_df = split_df(dfs[1], test_size, stratify_idx=stratify_idx)
             dfs = [dfs[0], val_df, test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
+        elif test_df is not None:
+            dfs+=[test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
     if ss_tfms is not None:
         if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
-    dsets = [dset(data_dir=data_dir, data=df, ss_data=ss_df, tfms=tfms_,
-                  ss_tfms=ss_tfms, class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,
+                  ss_tfms=ss_tfms, class_names=class_names, meta=meta) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
     dls = DataLoaders(*dls)
     dls.class_names = class_names
     dls.num_classes = len(class_names)
+    dls.class_weights = [get_class_weights(df) for df in dfs]
     dls.is_multi = is_multi
     dls.data_type = 'classification'
     dls.is_one_hot = is_multi + force_one_hot
@@ -326,31 +378,51 @@ def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True):
         # dl.suggested_crit = None
     return dls
 
-def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32):
+def get_class_weights(df):
+    df = df.copy()
+    try:
+        counts = sum(df.iloc[:,1])
+        total = sum(counts)
+        w = [(x/total) for x in counts]
+    except:
+        w = list(df.iloc[:,1].value_counts(normalize=True).sort_index())    
+    return 1-tensor(w)
+
+def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32, device='cpu'):
     
-    print('Calculating dataset mean and std. This may take a while.', end='')
+    # print('Calculating dataset mean and std. This may take a while.', end='')
+    print('Calculating dataset mean and std. This may take a while.\n')
     frac_data = df.sample(frac=stats_percentage).reset_index(drop=True).copy()
     tfms = instant_tfms(image_size, image_size)[1]
     dset = DaiDataset(frac_data, data_dir=data_dir, tfms=tfms)
-    dl = DataLoader(dset, batch_size=bs)
-    print('.', end='')
+    dl = DataLoader(dset, batch_size=bs, num_workers=4)
+    batches = len(dl)
+    # print('.', end='')
     mean = 0.0
-    for data_batch in dl:
-        images = data_batch[0]
+    print('Mean loop:')
+    for i,data_batch in enumerate(dl):
+        if i % (batches//10) == 0:
+            print(f'Batch: {i+1}/{batches}')
+        # images = data_batch[0]
+        images = data_batch['x'].to(device)
         batch_samples = images.size(0) 
         images = images.view(batch_samples, images.size(1), -1)
         mean += images.mean(2).sum(0)
     mean = mean / len(dl.dataset)
-    print('.', end='')
+    # print('.', end='')
     var = 0.0
-    for data_batch in dl:
-        images = data_batch[0]
+    print('\nStd loop:')
+    for i,data_batch in enumerate(dl):
+        if i % (batches//10) == 0:
+            print(f'Batch: {i+1}/{batches}')
+        # images = data_batch[0]
+        images = data_batch['x'].to(device)
         batch_samples = images.size(0)
         images = images.view(batch_samples, images.size(1), -1)
         var += ((images - mean.unsqueeze(1))**2).sum([0,2])
     std = torch.sqrt(var / (len(dl.dataset)*image_size*image_size))
-    print('Done.')
-    return mean, std
+    print('\nDone.')
+    return mean.cpu(), std.cpu()
 
 
 

@@ -253,13 +253,19 @@ def remove_key(d, x):
 def split_params(model, n=3):
     return list_map(np.array_split(params(model), n), list)
 
+def is_bce(x):
+    return isinstance(x, nn.BCEWithLogitsLoss)
+
+def is_cross_entropy(x):
+    return isinstance(x, nn.CrossEntropyLoss)
+
 def is_lars(x):
     return isinstance(x, LARS)
 
 def is_larc(x):
     return isinstance(x, LARC)
 
-def is_cuda(model):
+def model_is_cuda(model):
     return next(model.parameters()).is_cuda
 
 def is_list(x):
@@ -291,6 +297,9 @@ def is_set(x):
 
 def is_path(x):
     return isinstance(x, Path)
+
+def path_or_str(x):
+    return is_str(x) or is_path(x)
 
 def is_norm(x):
     return type(x).__name__ == 'Normalize'

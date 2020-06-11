@@ -327,6 +327,18 @@ def get_resize(tfms):
             return t
     return False
 
+def is_shuffle(dl):
+    return isinstance(dl.sampler, RandomSampler)
+
+def new_dl(dl_func, bs=None):
+    if bs is not None:
+        dl_func = partial(dl_func, batch_size=bs)
+    return dl_func()
+
+def set_resize_dims(tfms, h=224, w=224):
+    list(tfms)[0].height = h
+    list(tfms)[0].width = w
+
 def has_norm(tfms):
     tfms_list = list(tfms)
     for t in tfms_list:

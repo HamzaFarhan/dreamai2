@@ -561,7 +561,7 @@ class Learner:
     
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=1,
             load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None, pred_thresh=None,
-            class_weights=None, save_best=True):
+            class_weights=None, save_best=True, progressive_resizing=None):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
@@ -577,55 +577,74 @@ class Learner:
         self.pred_thresh = pred_thresh
         self.save_every = save_every
         self.save_best = save_best
+        self.progressive_resizing = progressive_resizing
         if not list_or_tuple(class_weights):
             class_weights = [class_weights]
         self.class_weights = class_weights
         if pred_thresh is None:
             self.pred_thresh = self.model.pred_thresh
-        # if (cycle_len > 1) and (cycle_len%2 == 0):
-        if cycle_len > 0:
-            cyclic_step = int((cycle_len/2)*len(self.dls.train))
-            factor = 6
-            set_lr(self.model.optimizer, 1.)
-            end_lr = self.find_clr(self.dls.train, plot=False)
-            clr = cyclical_lr(cyclic_step, min_lr=end_lr/factor, max_lr=end_lr)
-            scheduler = optim.lr_scheduler.LambdaLR(self.model.optimizer, [clr])
-            self.fit_scheduler = scheduler
-        elif lr is not None:
-            if list_or_tuple(lr):
-                lrs = lr
-                if len(self.model.optimizer.param_groups) == len(lrs):
-                    for i in range(len(self.model.optimizer.param_groups)):
-                        self.model.optimizer.param_groups[i]['lr'] = lrs[i]
+
+        def do_fit():
+            if cycle_len > 0:
+                cyclic_step = int((cycle_len/2)*len(self.dls.train))
+                factor = 6
+                set_lr(self.model.optimizer, 1.)
+                end_lr = self.find_clr(self.dls.train, plot=False)
+                clr = cyclical_lr(cyclic_step, min_lr=end_lr/factor, max_lr=end_lr)
+                scheduler = optim.lr_scheduler.LambdaLR(self.model.optimizer, [clr])
+                self.fit_scheduler = scheduler
+            elif lr is not None:
+                if list_or_tuple(lr):
+                    lrs = lr
+                    if len(self.model.optimizer.param_groups) == len(lrs):
+                        for i in range(len(self.model.optimizer.param_groups)):
+                            self.model.optimizer.param_groups[i]['lr'] = lrs[i]
+                    else:
+                        del self.model.optimizer.param_groups[:]
+                        if self.model_splitter is not None:
+                            p = self.model_splitter(self.model.model)
+                        if len(lrs) != len(p):
+                            p = split_params(self.model.model, len(lrs))
+                        for param,lr_ in zip(p,lrs):
+                            p_group = {'params': param, 'lr': lr_}
+                            self.model.optimizer.add_param_group(p_group)
                 else:
-                    del self.model.optimizer.param_groups[:]
-                    if self.model_splitter is not None:
-                        p = self.model_splitter(self.model.model)
-                    if len(lrs) != len(p):
-                        p = split_params(self.model.model, len(lrs))
-                    for param,lr_ in zip(p,lrs):
-                        p_group = {'params': param, 'lr': lr_}
-                        self.model.optimizer.add_param_group(p_group)
-            else:
-                set_lr(self.model.optimizer, lr)
+                    set_lr(self.model.optimizer, lr)
 
-        if is_lars(self.model.optimizer):
-            self.model.optimizer.epoch = 0
-            self.model.optimizer.param_groups[0]['max_epoch'] = epochs
+            if is_lars(self.model.optimizer):
+                self.model.optimizer.epoch = 0
+                self.model.optimizer.param_groups[0]['max_epoch'] = epochs
 
-        self('before_fit')
-        for self.curr_epoch in range(epochs):
-            if not self.do_training:
-                break
-            self('before_training')
-            self.train_epoch()
-            self('after_training')
-            
-            if validate_every and (self.curr_epoch % validate_every == 0):
-                self('before_valid')
-                self.val_epoch()
-                self('after_valid')                
-        self('after_fit')
+            self('before_fit')
+            for self.curr_epoch in range(epochs):
+                if not self.do_training:
+                    break
+                self('before_training')
+                self.train_epoch()
+                self('after_training')
+                
+                if validate_every and (self.curr_epoch % validate_every == 0):
+                    self('before_valid')
+                    self.val_epoch()
+                    self('after_valid')                
+            self('after_fit')
+
+        if progressive_resizing is not None:
+            for pr in progressive_resizing:
+                if not list_or_tuple(pr):
+                    pr = [pr]
+                h,w = pr[0],pr[0]
+                bs = None
+                if len(pr) > 1:
+                    bs = pr[1]
+                if len(pr) > 2:
+                    lr = pr[2]
+                # set_lr(self.model.optimizer, p_lr)
+                self.dls.progressive_resize(h=h, w=w, bs=bs)
+                print(f'\nImage Shape: ({h},{w}), Batch Size: {self.dls.train.batch_size}\n')
+                do_fit()
+        else:
+            do_fit()
 
     def predict(self, x, pred_thresh=None, device=None):
 
@@ -767,7 +786,8 @@ class Learner:
 
     def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=1, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
-                  print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True):
+                  print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
+                  progressive_resizing=None):
 
         def frozen_fit(epochs, c_len, early_stopping_epochs=None):
             print(f'+{"-"*10}+')
@@ -795,26 +815,33 @@ class Learner:
         if not list_or_tuple(cycle_len):
             cycle_len = [cycle_len]*len(epochs)
 
-        for i,e in enumerate(epochs):
-            c_len = cycle_len[i]
-            early_stopping = None
-            if i==(len(epochs)-1):
-                early_stopping = early_stopping_epochs
-            if i%2 == 0:
-                frozen_fit(epochs=e, c_len=c_len, early_stopping_epochs=early_stopping)
-            else:
-                unfrozen_fit(epochs=e, c_len=c_len, early_stopping_epochs=early_stopping)
-        # if list_or_tuple(cycle_len):
-        #     # len1,len2 = cycle_len[0], cycle_len[1]
-        #     for i,c_len in enumerate(cycle_len):
-        #         if i%2 == 0:
-        #             frozen_fit(c_len)
-        #         else:
-        #             unfrozen_fit(c_len)
-        # else:
-        #     len1,len2 = cycle_len, cycle_len
-        #     frozen_fit(len1)
-        #     unfrozen_fit(len2)
+        def run_fits():
+            for i,e in enumerate(epochs):
+                c_len = cycle_len[i]
+                early_stopping = None
+                if i==(len(epochs)-1):
+                    early_stopping = early_stopping_epochs
+                if i%2 == 0:
+                    frozen_fit(epochs=e, c_len=c_len, early_stopping_epochs=early_stopping)
+                else:
+                    unfrozen_fit(epochs=e, c_len=c_len, early_stopping_epochs=early_stopping)
+
+        if progressive_resizing is not None:
+            for pr in progressive_resizing:
+                if not list_or_tuple(pr):
+                    pr = [pr]
+                h,w = pr[0],pr[0]
+                bs = None
+                if len(pr) > 1:
+                    bs = pr[1]
+                if len(pr) > 2:
+                    p_lr = pr[2]
+                set_lr(self.model.optimizer, p_lr)
+                self.dls.progressive_resize(h=h, w=w, bs=bs)
+                print(f'\nImage Shape: ({h},{w}), Batch Size: {self.dls.train.batch_size}\n')
+                run_fits()
+        else:
+            run_fits()
 
     def find_lr(self, dl=None, init_value=1e-8, final_value=10., beta=0.98, class_weights=None, plot=False):
 

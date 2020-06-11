@@ -262,7 +262,7 @@ class dai_classifier_dataset(Dataset):
 
 def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
                        tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
-                       pin_memory=True, num_workers=4, force_one_hot=False, meta=False,
+                       pin_memory=True, num_workers=4, force_one_hot=False, meta_idx=None,
                        class_names=None, split=True, val_size=0.2, test_size=0.15):
     
     # if list_or_tuple(dfs):
@@ -320,7 +320,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
     if ss_tfms is not None:
         if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
     dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,
-                  ss_tfms=ss_tfms, class_names=class_names, meta=meta) for df,tfms_ in zip(dfs, transforms_)]
+                  ss_tfms=ss_tfms, class_names=class_names, meta_idx=meta_idx) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
@@ -345,10 +345,19 @@ class DataLoaders():
         store_attr(self, 'train,valid,test')
         if self.train:
             self.train_ds = self.train.dataset
+            self.train_dl = partial(DataLoader, dataset=self.train_ds, batch_size=self.train.batch_size,
+                                    shuffle=is_shuffle(self.train), num_workers=self.train.num_workers,
+                                    pin_memory=self.train.pin_memory)
         if self.valid:
             self.valid_ds = self.valid.dataset
+            self.valid_dl = partial(DataLoader, dataset=self.valid_ds, batch_size=self.valid.batch_size,
+                                    shuffle=is_shuffle(self.valid), num_workers=self.valid.num_workers,
+                                    pin_memory=self.valid.pin_memory)
         if self.test:
             self.test_ds = self.test.dataset
+            self.test_dl = partial(DataLoader, dataset=self.test_ds, batch_size=self.test.batch_size,
+                                   shuffle=is_shuffle(self.test), num_workers=self.test.num_workers,
+                                   pin_memory=self.test.pin_memory)
 
         norm_t = get_norm(self.train_ds.tfms)
         if norm_t:
@@ -366,6 +375,38 @@ class DataLoaders():
 
     def one_batch(self, dl_name='train'):
         return next_batch(getattr(self, dl_name))
+
+    def assign_dls(self, train=None, valid=None, test=None):
+        store_attr(self, 'train,valid,test')
+        if self.train:
+            self.train_ds = self.train.dataset
+            self.train_dl = partial(DataLoader, dataset=self.train_ds, batch_size=self.train.batch_size,
+                                    shuffle=is_shuffle(self.train), num_workers=self.train.num_workers,
+                                    pin_memory=self.train.pin_memory)
+        if self.valid:
+            self.valid_ds = self.valid.dataset
+            self.valid_dl = partial(DataLoader, dataset=self.valid_ds, batch_size=self.valid.batch_size,
+                                    shuffle=is_shuffle(self.valid), num_workers=self.valid.num_workers,
+                                    pin_memory=self.valid.pin_memory)
+        if self.test:
+            self.test_ds = self.test.dataset
+            self.test_dl = partial(DataLoader, dataset=self.test_ds, batch_size=self.test.batch_size,
+                                   shuffle=is_shuffle(self.test), num_workers=self.test.num_workers,
+                                   pin_memory=self.test.pin_memory)
+
+    def progressive_resize(self, h=224, w=224, bs=32):
+        new_train_dl, new_valid_dl, new_test_dl = None, None, None
+        if self.train:
+            set_resize_dims(self.train_ds.tfms, h=h, w=w)
+            new_train_dl = new_dl(self.train_dl, bs=bs)
+        if self.valid:
+            set_resize_dims(self.valid_ds.tfms, h=h, w=w)
+            new_valid_dl = new_dl(self.valid_dl, bs=bs)
+        if self.test:
+            set_resize_dims(self.test_ds.tfms, h=h, w=w)
+            new_test_dl = new_dl(self.test_dl, bs=bs)
+
+        self.assign_dls(new_train_dl, new_valid_dl, new_test_dl)
 
     def __len__(self):
         return sum([(self.train!=None) + (self.valid!=None) + (self.test!=None)])

@@ -835,8 +835,8 @@ class Learner:
                 if len(pr) > 1:
                     bs = pr[1]
                 if len(pr) > 2:
-                    p_lr = pr[2]
-                set_lr(self.model.optimizer, p_lr)
+                    frozen_lr, unfrozen_lr = pr[2], pr[2]
+                # set_lr(self.model.optimizer, p_lr)
                 self.dls.progressive_resize(h=h, w=w, bs=bs)
                 print(f'\nImage Shape: ({h},{w}), Batch Size: {self.dls.train.batch_size}\n')
                 run_fits()

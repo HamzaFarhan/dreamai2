@@ -398,12 +398,18 @@ class DataLoaders():
         new_train_dl, new_valid_dl, new_test_dl = None, None, None
         if self.train:
             set_resize_dims(self.train_ds.tfms, h=h, w=w)
+            if self.train_ds.ss_tfms is not None:
+                set_resize_dims(self.train_ds.ss_tfms, h=h, w=w)
             new_train_dl = new_dl(self.train_dl, bs=bs)
         if self.valid:
             set_resize_dims(self.valid_ds.tfms, h=h, w=w)
+            if self.valid_ds.ss_tfms is not None:
+                set_resize_dims(self.valid_ds.ss_tfms, h=h, w=w)
             new_valid_dl = new_dl(self.valid_dl, bs=bs)
         if self.test:
             set_resize_dims(self.test_ds.tfms, h=h, w=w)
+            if self.test_ds.ss_tfms is not None:
+                set_resize_dims(self.test_ds.ss_tfms, h=h, w=w)
             new_test_dl = new_dl(self.test_dl, bs=bs)
 
         self.assign_dls(new_train_dl, new_valid_dl, new_test_dl)

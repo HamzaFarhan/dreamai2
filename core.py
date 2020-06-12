@@ -437,7 +437,7 @@ class SimilarityModel(DaiModel):
     def compute_loss(self, outputs, y):
         return self.criterion(outputs, y)
 
-    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
+    def process_batch(self, data_batch, device=None):
         if device is None:
             device = self.device
         # img1,img2 = data_batch[0], data_batch[1]
@@ -445,6 +445,16 @@ class SimilarityModel(DaiModel):
         img1 = img1.to(device)
         img2 = img2.to(device)
         outputs = self.forward(img1, img2)
+        return outputs
+
+    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
+        if device is None:
+            device = self.device
+        # img1,img2 = data_batch['x'], data_batch['x2']
+        # img1 = img1.to(device)
+        # img2 = img2.to(device)
+        # outputs = self.forward(img1, img2)
+        outputs = self.process_batch(data_batch, device=device)
         y = torch.ones(outputs[0][0].shape[0]).to(device)
         loss = self.compute_loss(*outputs, y)
         if backward_step:
@@ -456,17 +466,17 @@ class SimilarityModel(DaiModel):
 
     def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
         ret = {}
-        # img1,img2 = data_batch[0], data_batch[1]
-        img1,img2 = data_batch['x'], data_batch['x2']
-        img1 = img1.to(device)
-        img2 = img2.to(device)
-        outputs = self.forward(img1, img2)
-        y = torch.ones(outputs[0][0].shape[0]).to(device)
+        # img1,img2 = data_batch['x'], data_batch['x2']
+        # img1 = img1.to(device)
+        # img2 = img2.to(device)
+        # outputs = self.forward(img1, img2)
+        outputs = self.process_batch(data_batch)
+        y = torch.ones(outputs[0][0].shape[0]).to(self.device)
         loss = self.compute_loss(*outputs, y)
         ret['loss'] = loss.item()
         ret['outputs'] = outputs
-        if 'accuracy' in metric:
-            self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
+        # if 'accuracy' in metric:
+            # self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
         
         return loss.item(), outputs
 

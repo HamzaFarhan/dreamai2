@@ -561,7 +561,7 @@ class Learner:
     
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=1,
             load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None, pred_thresh=None,
-            class_weights=None, save_best=True, progressive_resizing=None):
+            class_weights=None, save_best=True, progressive_resizing=None, crit=None):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
@@ -578,6 +578,10 @@ class Learner:
         self.save_every = save_every
         self.save_best = save_best
         self.progressive_resizing = progressive_resizing
+        model_crit = None
+        if crit is not None:
+            model_crit = copy.deepcopy(self.model.criterion)
+            self.model.criterion = crit
         if not list_or_tuple(class_weights):
             class_weights = [class_weights]
         self.class_weights = class_weights
@@ -645,6 +649,9 @@ class Learner:
                 do_fit()
         else:
             do_fit()
+
+        if model_crit is not None:
+            self.model.criterion = model_crit
 
     def predict(self, x, pred_thresh=None, device=None):
 
@@ -787,7 +794,7 @@ class Learner:
     def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=1, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
                   print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
-                  progressive_resizing=None):
+                  progressive_resizing=None, crit=None):
 
         def frozen_fit(epochs, c_len, early_stopping_epochs=None):
             print(f'+{"-"*10}+')
@@ -795,7 +802,7 @@ class Learner:
             print(f'+{"-"*10}+')
             self.freeze()
             self.fit(epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen, semi_sup=semi_sup,
-                    save_every=save_every, print_every=print_every, validate_every=validate_every,
+                    save_every=save_every, print_every=print_every, validate_every=validate_every, crit=crit,
                     cycle_len=c_len, save_class=save_class, print_progress=print_progress, save_best=save_best,
                     class_weights=class_weights, pred_thresh=pred_thresh, early_stopping_epochs=early_stopping_epochs)
         
@@ -807,7 +814,7 @@ class Learner:
             self.unfreeze()
             self.fit(epochs, lr=unfrozen_lr, metric=metric, load_best=load_best_unfrozen, semi_sup=semi_sup,
                     save_every=save_every, print_every=print_every, validate_every=validate_every, save_best=save_best,
-                    early_stopping_epochs=early_stopping_epochs, cycle_len=c_len, save_class=save_class,
+                    early_stopping_epochs=early_stopping_epochs, cycle_len=c_len, save_class=save_class, crit=crit,
                     print_progress=print_progress, pred_thresh=pred_thresh, class_weights=class_weights)
 
         if not list_or_tuple(epochs):

@@ -41,10 +41,10 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     if bn_final: layers.append(nn.BatchNorm1d(lin_ftrs[-1], momentum=0.01))
     return nn.Sequential(*layers)
 
-def create_model(arch, num_classes, num_extra=3, meta_len=0):
+def create_model(arch, num_classes, num_extra=3, meta_len=0, pretrained=True):
     meta = models_meta[arch]
-    body = create_body(arch, meta['cut'], num_extra=num_extra)
-    head = create_head((meta['conv_channels']*2)+meta_len, num_classes)
+    body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
+    head = create_head(nf=(meta['conv_channels']*2)+meta_len, n_out=num_classes)
     net = nn.Sequential(body, head)
     return net
 
@@ -67,26 +67,52 @@ class AdaptiveConcatPool2d(nn.Module):
         self.mp = nn.AdaptiveMaxPool2d(self.size)
     def forward(self, x): return torch.cat([self.mp(x), self.ap(x)], 1)
 
+# class FocalLoss(nn.Module):
+#     def __init__(self, alpha=1, gamma=2, logits=True, reduce=True):
+#         super(FocalLoss, self).__init__()
+#         self.alpha = alpha
+#         self.gamma = gamma
+#         self.logits = logits
+#         self.reduce = reduce
+
+#     def forward(self, inputs, targets):
+#         if self.logits:
+#             BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
+#         else:
+#             BCE_loss = F.binary_cross_entropy(inputs, targets, reduce=False)
+#         pt = torch.exp(-BCE_loss)
+#         F_loss = self.alpha * (1-pt)**self.gamma * BCE_loss
+
+#         if self.reduce:
+#             return torch.mean(F_loss)
+#         else:
+#             return F_loss
+
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=1, gamma=2, logits=True, reduce=True):
+    def __init__(self, alpha=1, gamma=2, reduce=True):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
-        self.logits = logits
         self.reduce = reduce
 
-    def forward(self, inputs, targets):
-        if self.logits:
-            BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
-        else:
-            BCE_loss = F.binary_cross_entropy(inputs, targets, reduce=False)
-        pt = torch.exp(-BCE_loss)
-        F_loss = self.alpha * (1-pt)**self.gamma * BCE_loss
-
+    def forward(self, loss):
+        pt = torch.exp(-loss)
+        F_loss = self.alpha * (1-pt)**self.gamma * loss
         if self.reduce:
             return torch.mean(F_loss)
         else:
             return F_loss
+
+def focal_loss_(loss, alpha=1, gamma=2, reduce=True):
+    pt = torch.exp(-loss)
+    F_loss = alpha * (1-pt)**gamma * loss
+    if reduce:
+        return torch.mean(F_loss)
+    else:
+        return F_loss
+
+# def focal_loss(alpha=1, gamma=2, reduce=True):
+    # return partial(focal_loss_, alpha=alpha, gamma=gamma, reduce=reduce)
 
 class Printer(nn.Module):
     def forward(self,x):
@@ -228,7 +254,16 @@ class DaiModel(nn.Module):
         ftrs = torch.cat([self.model[0](x), meta], dim=1)
         return self.model[1](ftrs)
     
-    def compute_loss(self, outputs, labels, class_weights=None):
+    def compute_loss(self, outputs, labels, class_weights=None, extra_loss_func=None, **kwargs):
+        if extra_loss_func is not None:
+            r = getattr(self.criterion, 'reduction')
+            setattr(self.criterion, 'reduction', 'none')
+            loss = self.criterion(outputs, labels)
+            # print('ooooh')
+            setattr(self.criterion, 'reduction', r)
+            loss = extra_loss_func(loss)
+            # print('focal')
+            return loss
         if class_weights is not None:
             class_weights = class_weights.to(outputs.device)
             if is_bce(self.criterion):
@@ -259,7 +294,7 @@ class DaiModel(nn.Module):
         outputs = self.forward(inputs, meta=meta)
         return outputs, labels
 
-    def batch_to_loss(self, data_batch, backward_step=True, class_weights=None, device=None):
+    def batch_to_loss(self, data_batch, backward_step=True, class_weights=None, extra_loss_func=None, device=None, **kwargs):
         if device is None:
             device = self.device
         # inputs,labels = data_batch['x'], data_batch['label']
@@ -270,7 +305,7 @@ class DaiModel(nn.Module):
         #     meta = data_batch['meta'].to(device)
         # outputs = self.forward(inputs, meta=meta)
         outputs, labels = self.process_batch(data_batch, device=device)
-        loss = self.compute_loss(outputs, labels, class_weights=class_weights)
+        loss = self.compute_loss(outputs, labels, class_weights=class_weights, extra_loss_func=extra_loss_func)
         if backward_step:
             self.optimizer.zero_grad()
             loss.backward()
@@ -286,7 +321,7 @@ class DaiModel(nn.Module):
             ss_model = copy.deepcopy(self.model)
             return flatten_tensor(ss_model(img1).detach()), flatten_tensor(self.model(img2))
 
-    def ss_batch_to_loss(self, data_batch, backward_step=True, class_weights=None, device=None):
+    def ss_batch_to_loss(self, data_batch, backward_step=True, class_weights=None, extra_loss_func=None, device=None, **kwargs):
         if device is None:
             device = self.device
         # img1, labels, img2, x2 = data_batch[0], data_batch[1], data_batch[2], data_batch[3]
@@ -300,7 +335,7 @@ class DaiModel(nn.Module):
         if 'meta' in data_batch.keys():
             meta = data_batch['meta'].to(device)
         outputs = self.forward(img1, meta=meta)
-        loss = self.compute_loss(outputs, labels, class_weights=class_weights)
+        loss = self.compute_loss(outputs, labels, class_weights=class_weights, extra_loss_func=extra_loss_func)
         y = torch.ones(ss_outputs[0].shape[0]).to(device)
         # print(y.shape, ss_outputs[0].shape)
         l = torch.nn.CosineEmbeddingLoss()
@@ -329,7 +364,7 @@ class DaiModel(nn.Module):
         elif metric == 'multi_accuracy':
             classifier.update_multi_accuracies(outputs, labels, thresh)
 
-    def val_batch_to_loss(self, data_batch, metric='loss', thresh=None, class_weights=None, **kwargs):
+    def val_batch_to_loss(self, data_batch, metric='loss', thresh=None, class_weights=None, extra_loss_func=None, **kwargs):
         ret = {}
         # inputs,labels = data_batch['x'], data_batch['label']
         # inputs = inputs.to(self.device)
@@ -339,7 +374,7 @@ class DaiModel(nn.Module):
             # meta = data_batch['meta'].to(self.device)
         # outputs = self.forward(inputs, meta=meta)
         outputs, labels = self.process_batch(data_batch, device=self.device)
-        loss = self.compute_loss(outputs, labels, class_weights=class_weights)
+        loss = self.compute_loss(outputs, labels, class_weights=class_weights, extra_loss_func=extra_loss_func)
         ret['loss'] = loss.item()
         ret['outputs'] = outputs
         if 'accuracy' in metric:

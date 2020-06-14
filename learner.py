@@ -231,7 +231,7 @@ def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):
 
 class Ensemble():
     def __init__(self, nets, model_paths, model_class=DaiModel, model_weights=1., pred_thresh=0.5,
-                 metric='accuracy', device='cpu'):
+                 metric='accuracy', device='cpu', extra_loss_func=None):
         if path_or_str(model_paths):
             model_paths = Path(model_paths)
             model_paths = sorted_paths(model_paths)
@@ -246,12 +246,15 @@ class Ensemble():
             nets = [nets]*len(model_paths)
         self.models = [model_class(copy.deepcopy(net), device=device, checkpoint=torch.load(mp, map_location='cpu'),
                                    load_opt=True, load_crit=True, load_misc=False) for net,mp in zip(nets,model_paths)]
+        self.extra_loss_func = extra_loss_func
         
-    def batch_to_loss(self, data_batch, model_weights=None, class_weights=None, device=None):
+    def batch_to_loss(self, data_batch, model_weights=None, class_weights=None, extra_loss_func=None, device=None):
         if model_weights is None:
             model_weights = self.model_weights
         if device is None:
             device = self.device
+        if extra_loss_func is None:
+            extra_loss_func = self.extra_loss_func
         if not list_or_tuple(model_weights):
             model_weights = [model_weights]*len(self.models)
         outputs_labels = [model.process_batch(data_batch, device=device) for model in self.models]
@@ -261,7 +264,7 @@ class Ensemble():
         outputs = torch.sum(outputs, dim=0)
         # print(outputs.shape)
         labels = outputs_labels[0][1]
-        loss = self.models[0].compute_loss(outputs, labels, class_weights=class_weights)
+        loss = self.models[0].compute_loss(outputs, labels, class_weights=class_weights, extra_loss_func=extra_loss_func)
         return loss.item(), outputs, labels
     
     def to_eval(self):
@@ -273,7 +276,7 @@ class Ensemble():
             self.models[i].train()
 
     def evaluate(self, dl, model_weights=None, class_weights=None, class_names=None,
-                 metric=None, pred_thresh=None, device=None):
+                 metric=None, pred_thresh=None, device=None, extra_loss_func=None):
 
         if device is None:
             device = self.device
@@ -286,6 +289,9 @@ class Ensemble():
         
         if model_weights is None:
             model_weights = self.model_weights
+        
+        if extra_loss_func is None:
+            extra_loss_func = self.extra_loss_func
     
         running_loss = 0.
         classifier = None
@@ -304,7 +310,7 @@ class Ensemble():
         with torch.no_grad():
             for data_batch in dl:
                 loss, outputs, labels = self.batch_to_loss(data_batch=data_batch, model_weights=model_weights,
-                                                           class_weights=class_weights, device=device)
+                                                           class_weights=class_weights, device=device, extra_loss_func=extra_loss_func)
                 running_loss += loss
                 if classifier is not None:
                     # labels = data_batch[1].to(device)
@@ -434,6 +440,7 @@ class Learner:
         self.model.denorm = dls.denorm
         self.model.img_mean = dls.img_mean
         self.model.img_std = dls.img_std
+        self.extra_loss_func = None
         self.is_frozen = False
         assert len(cbs) > 0, print('Please pass some callbacks for training.')
     
@@ -523,9 +530,11 @@ class Learner:
     def train_batch(self):
         self('before_train_batch')
         if self.semi_sup:
-            self.tr_batch_loss = self.model.ss_batch_to_loss(self.data_batch, class_weights=self.class_weights[0])[0]
+            self.tr_batch_loss = self.model.ss_batch_to_loss(self.data_batch, class_weights=self.class_weights[0],
+                                                             extra_loss_func=self.extra_loss_func)[0]
         else:
-            self.tr_batch_loss = self.model.batch_to_loss(self.data_batch, class_weights=self.class_weights[0])[0]
+            self.tr_batch_loss = self.model.batch_to_loss(self.data_batch, class_weights=self.class_weights[0],
+                                                          extra_loss_func=self.extra_loss_func)[0]
         if self.fit_scheduler is not None:
             self.fit_scheduler.step()
             # print(get_lr(self.model.optimizer))
@@ -535,7 +544,8 @@ class Learner:
         self('before_val_batch')
         self.val_batch_loss = self.model.val_batch_to_loss(self.data_batch, metric=self.learn_metric,
                                                            classifier=self.classifier, thresh=self.pred_thresh,
-                                                           class_weights=self.class_weights[-1])[0]
+                                                           class_weights=self.class_weights[-1],
+                                                           extra_loss_func=self.extra_loss_func)[0]
         self('after_val_batch')
     
     def train_epoch(self):
@@ -561,7 +571,7 @@ class Learner:
     
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=1,
             load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None, pred_thresh=None,
-            class_weights=None, save_best=True, progressive_resizing=None, crit=None):
+            class_weights=None, save_best=True, progressive_resizing=None, extra_loss_func=None):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
@@ -578,15 +588,12 @@ class Learner:
         self.save_every = save_every
         self.save_best = save_best
         self.progressive_resizing = progressive_resizing
-        model_crit = None
-        if crit is not None:
-            model_crit = copy.deepcopy(self.model.criterion)
-            self.model.criterion = crit
         if not list_or_tuple(class_weights):
             class_weights = [class_weights]
         self.class_weights = class_weights
         if pred_thresh is None:
             self.pred_thresh = self.model.pred_thresh
+        self.extra_loss_func = extra_loss_func
 
         def do_fit():
             if cycle_len > 0:
@@ -649,9 +656,6 @@ class Learner:
                 do_fit()
         else:
             do_fit()
-
-        if model_crit is not None:
-            self.model.criterion = model_crit
 
     def predict(self, x, pred_thresh=None, device=None):
 
@@ -718,7 +722,7 @@ class Learner:
         rmse_ = 0.
         with torch.no_grad():
             for data_batch in dl:
-                loss, outputs = self.model.batch_to_loss(data_batch, backward_step=False,
+                loss, outputs = self.model.batch_to_loss(data_batch, backward_step=False, extra_loss_func=self.extra_loss_func,
                                                          class_weights=class_weights, device=device)
                 running_loss += loss
                 if classifier is not None:
@@ -794,7 +798,7 @@ class Learner:
     def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=1, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
                   print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
-                  progressive_resizing=None, crit=None):
+                  progressive_resizing=None, extra_loss_func=None):
 
         def frozen_fit(epochs, c_len, early_stopping_epochs=None):
             print(f'+{"-"*10}+')
@@ -802,9 +806,10 @@ class Learner:
             print(f'+{"-"*10}+')
             self.freeze()
             self.fit(epochs, lr=frozen_lr, metric=metric, load_best=load_best_frozen, semi_sup=semi_sup,
-                    save_every=save_every, print_every=print_every, validate_every=validate_every, crit=crit,
+                    save_every=save_every, print_every=print_every, validate_every=validate_every,
                     cycle_len=c_len, save_class=save_class, print_progress=print_progress, save_best=save_best,
-                    class_weights=class_weights, pred_thresh=pred_thresh, early_stopping_epochs=early_stopping_epochs)
+                    class_weights=class_weights, pred_thresh=pred_thresh, early_stopping_epochs=early_stopping_epochs,
+                    extra_loss_func=extra_loss_func)
         
         def unfrozen_fit(epochs, c_len, early_stopping_epochs):
             print()
@@ -814,8 +819,9 @@ class Learner:
             self.unfreeze()
             self.fit(epochs, lr=unfrozen_lr, metric=metric, load_best=load_best_unfrozen, semi_sup=semi_sup,
                     save_every=save_every, print_every=print_every, validate_every=validate_every, save_best=save_best,
-                    early_stopping_epochs=early_stopping_epochs, cycle_len=c_len, save_class=save_class, crit=crit,
-                    print_progress=print_progress, pred_thresh=pred_thresh, class_weights=class_weights)
+                    early_stopping_epochs=early_stopping_epochs, cycle_len=c_len, save_class=save_class,
+                    print_progress=print_progress, pred_thresh=pred_thresh, class_weights=class_weights,
+                    extra_loss_func=extra_loss_func)
 
         if not list_or_tuple(epochs):
             epochs = [epochs, epochs]
@@ -871,7 +877,7 @@ class Learner:
         log_lrs = []
         for data_batch in dl:
             batch_num += 1
-            loss = self.model.batch_to_loss(data_batch, class_weights=class_weights)[0]
+            loss = self.model.batch_to_loss(data_batch, class_weights=class_weights, extra_loss_func=self.extra_loss_func)[0]
             #Compute the smoothed loss
             avg_loss = beta * avg_loss + (1-beta) * loss
             smoothed_loss = avg_loss / (1 - beta**batch_num)
@@ -938,7 +944,7 @@ class Learner:
             if lr_find_epochs > 1:
                 print("Epoch: {}".format(i+1))
             for data_batch in dl:
-                loss = self.model.batch_to_loss(data_batch, class_weights=class_weights)[0]
+                loss = self.model.batch_to_loss(data_batch, class_weights=class_weights, extra_loss_func=self.extra_loss_func)[0]
                 scheduler.step()
                 if iter >= min(3,(len(dl)//8)):
                     if loss <= best_loss:

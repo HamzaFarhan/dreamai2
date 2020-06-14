@@ -263,8 +263,9 @@ class dai_classifier_dataset(Dataset):
 def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
                        tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
                        pin_memory=True, num_workers=4, force_one_hot=False, meta_idx=None,
-                       class_names=None, split=True, val_size=0.2, test_size=0.15):
-    
+                       class_names=None, split=True, val_size=0.2, test_size=0.15, **kwargs):
+    # if len(kwargs) > 0:
+        # dset = partial(dset, **kwargs)
     # if list_or_tuple(dfs):
     #     df = dfs[0]
     #     if len(dfs) > 1:
@@ -319,7 +320,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
             transforms_ = [tfms[0], tfms[1], tfms[1]]
     if ss_tfms is not None:
         if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
-    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, **kwargs,
                   ss_tfms=ss_tfms, class_names=class_names, meta_idx=meta_idx) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:

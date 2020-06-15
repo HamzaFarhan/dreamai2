@@ -231,7 +231,10 @@ def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):
 
 class Ensemble():
     def __init__(self, nets, model_paths, model_class=DaiModel, model_weights=1., pred_thresh=0.5,
-                 metric='accuracy', device='cpu', extra_loss_func=None):
+                 metric='accuracy', device=None, extra_loss_func=None):
+
+        if device is None:
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if path_or_str(model_paths):
             model_paths = Path(model_paths)
             model_paths = sorted_paths(model_paths)

@@ -237,8 +237,10 @@ class BasicModel(nn.Module):
 
 class DaiModel(nn.Module):
     def __init__(self, model, opt=None, crit=nn.BCEWithLogitsLoss(), pred_thresh=0.5,
-                 device='cpu', checkpoint=None, load_opt=False, load_crit=False, load_misc=False):
+                 device=None, checkpoint=None, load_opt=False, load_crit=False, load_misc=False):
         super().__init__()
+        if device is None:
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model = model.to(device)
         self.optimizer = opt
         self.device = device
@@ -472,7 +474,7 @@ class DaiModel(nn.Module):
                     setattr(self, k, checkpoint[k])
 
 class SimilarityModel(DaiModel):
-    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device='cpu', checkpoint=None, load_opt=False):
+    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device=None, checkpoint=None, load_opt=False):
         super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt)
         # self.model = model.to(device)
         # self.optimizer = opt
@@ -511,7 +513,7 @@ class SimilarityModel(DaiModel):
         # img2 = img2.to(device)
         # outputs = self.forward(img1, img2)
         outputs = self.process_batch(data_batch, device=device)
-        y = torch.ones(outputs[0][0].shape[0]).to(device)
+        y = data_batch['same'] * torch.ones(outputs[0][0].shape[0]).to(device)
         loss = self.compute_loss(*outputs, y)
         if backward_step:
             self.optimizer.zero_grad()
@@ -527,7 +529,7 @@ class SimilarityModel(DaiModel):
         # img2 = img2.to(device)
         # outputs = self.forward(img1, img2)
         outputs = self.process_batch(data_batch)
-        y = torch.ones(outputs[0][0].shape[0]).to(self.device)
+        y = data_batch['same'] * torch.ones(outputs[0][0].shape[0]).to(device)
         loss = self.compute_loss(*outputs, y)
         ret['loss'] = loss.item()
         ret['outputs'] = outputs

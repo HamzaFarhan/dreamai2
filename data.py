@@ -201,6 +201,236 @@ class DaiDataset(Dataset):
         return ret
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
+class SimilarityDataset(Dataset):
+    
+    def __init__(self, data, data_dir='', tfms=None, tfms2=None, channels=3,**kwargs):
+        super(DaiDataset, self).__init__()
+        self.data_dir = str(data_dir)
+        self.data = data
+        self.tfms = tfms
+        self.tfms2 = tfms2
+        # if tfms is not None:
+            # self.tfms = albu.Compose(tfms)
+        # else:
+            # self.tfms = tfms
+        self.channels = channels
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
+        
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        try:
+            img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+        except:
+            img_path = os.path.join(self.data_dir, self.data[index, 0])
+        # if not Path(img_path).exists():
+        #print(img_path)
+        if self.channels == 3:
+            img = rgb_read(img_path)
+        else:    
+            img = c1_read(img_path)
+        try:
+            y = self.data.iloc[index, 1]
+        except:
+            y = self.data[index, 1]
+        if self.tfms is not None:
+            x = apply_tfms(img.copy(), self.tfms)
+            # x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x = x.unsqueeze(0)
+        else:
+            x = img
+        if is_str(y) and hasattr(self, 'class_names'):
+            y = self.class_names.index(y)
+        # ret = {'x':x, 'label':y, 'path':self.data.iloc[index, 0]}
+
+        index2 = random.choice(range(len(self.data)))
+        try:
+            y2 = self.data.iloc[index2, 1]
+        except:
+            y2 = self.data[index2, 1]
+        if is_str(y2) and hasattr(self, 'class_names'):
+            y2 = self.class_names.index(y2)
+        try:
+            if y2 == y:
+                same = 1
+            else:
+                same = -1
+        except:
+            if (y2 == y).all():
+                same = 1
+            else:
+                same = -1
+
+        while y2 != y:
+            index2 = random.choice(range(len(self.data)))
+            try:
+                y2 = self.data.iloc[index2, 1]
+            except:
+                y2 = self.data[index2, 1]
+            if is_str(y2) and hasattr(self, 'class_names'):
+                y2 = self.class_names.index(y2)
+        try:
+            img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
+        except:
+            img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
+        if self.channels == 3:
+            img2 = rgb_read(img_path2)
+        else:    
+            img2 = c1_read(img_path2)
+
+        if self.tfms2 is not None:
+            x2 = apply_tfms(img2.copy(), self.tfms2)
+            # x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x2 = x2.unsqueeze(0)
+        elif self.tfms is not None:
+            x2 = apply_tfms(img2.copy(), self.tfms)
+            # x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x2 = x2.unsqueeze(0)
+        else:
+            x2 = img2
+        
+        ret = {'x':x, 'label':y, 'path':self.data.iloc[index, 0], 'x2':x2, 'label2':y2,
+               'path2':self.data.iloc[index2, 0], 'same':same}
+
+        return ret
+
+    def get_at_index(self, index, denorm=True, show=True):
+        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
+        if self.channels == 3:
+            img = rgb_read(img_path)
+        else:    
+            img = c1_read(img_path)
+        
+        y = self.data.iloc[index, 1]
+        if not is_str(y):
+            label = self.data.iloc[index, 2]
+        else:
+            label = y
+        if self.tfms is not None:
+            x = apply_tfms(img.copy(), self.tfms)
+            # x = (self.tfms(image=img)['image'])
+            if self.channels == 1:
+                x = x.unsqueeze(0)
+            x = tensor_to_img(x)
+            if denorm:
+                norm_t = get_norm(self.tfms)
+                if norm_t:
+                    mean = norm_t.mean
+                    std = norm_t.std
+                    x = denorm_img(x, mean, std)
+        else:
+            x = img
+        p = self.data.iloc[index, 0]
+
+        ret = {'x':x, 'label':y, 'path':p}
+
+        index2 = random.choice(range(len(self.data)))
+        try:
+            y2 = self.data.iloc[index2, 1]
+        except:
+            y2 = self.data[index2, 1]
+
+        # while y2 != y:
+        #     index2 = random.choice(range(len(self.data)))
+        #     try:
+        #         y2 = self.data.iloc[index2, 1]
+        #     except:
+        #         y2 = self.data[index2, 1]
+        
+        if not is_str(y2):
+            label2 = self.data.iloc[index2, 2]
+        else:
+            label2 = y2        
+
+        try:
+            img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
+        except:
+            img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
+        if self.channels == 3:
+            img2 = rgb_read(img_path2)
+        else:    
+            img2 = c1_read(img_path2)
+        
+        if self.tfms2 is not None:
+            x2 = apply_tfms(img2.copy(), self.tfms2)
+            # x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x2 = x2.unsqueeze(0)
+            x2 = tensor_to_img(x2)
+            norm_t = get_norm(self.tfms2)
+            if norm_t:
+                mean = norm_t.mean
+                std = norm_t.std
+            else:
+                std = None
+                mean = None
+            resize_t = list(self.tfms2)[0]
+            h,w = resize_t.height, resize_t.width
+            img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
+            img2 = apply_tfms(img2, img2_tfms)
+            if self.channels == 1:
+                img2 = img2.unsqueeze(0)
+            img2 = tensor_to_img(img2)
+            if denorm:
+                # norm_t = get_norm(self.ss_tfms)
+                # if norm_t:
+                    # mean = norm_t.mean
+                    # std = norm_t.std
+                img2 = denorm_img(img2, mean, std)
+                x2 = denorm_img(x2, mean, std)
+        elif self.tfms is not None:
+            x2 = apply_tfms(img2.copy(), self.tfms)
+            # x = self.tfms(image=img)['image']
+            if self.channels == 1:
+                x2 = x2.unsqueeze(0)
+            x2 = tensor_to_img(x2)
+            norm_t = get_norm(self.tfms)
+            if norm_t:
+                mean = norm_t.mean
+                std = norm_t.std
+            else:
+                std = None
+                mean = None
+            resize_t = list(self.tfms)[0]
+            h,w = resize_t.height, resize_t.width
+            img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
+            img2 = apply_tfms(img2, img2_tfms)
+            if self.channels == 1:
+                img2 = img2.unsqueeze(0)
+            img2 = tensor_to_img(img2)
+            if denorm:
+                # norm_t = get_norm(self.ss_tfms)
+                # if norm_t:
+                    # mean = norm_t.mean
+                    # std = norm_t.std
+                img2 = denorm_img(img2, mean, std)
+                x2 = denorm_img(x2, mean, std)
+        else:
+            x2 = img2
+
+        p2 = self.data.iloc[index2, 0]
+
+        ret = {'x':x, 'label':y, 'img2':img2, 'x2':x2, 'label2':y2, 'path':p, 'path2':p2}
+                
+        if show:
+            print(f'path1: {p}')
+            # if self.tfms is None:
+                # aug = ''
+            # else: aug = ' Augmented'
+            plt_show(x, title=f'Image1: {label}')
+            # if self.ss_tfms is not None:
+            # plt_show(img2, title=f'SS Image: {label}')
+            print(f'path2: {p2}')
+            plt_show(x2, title=f'Image2: {label2}')
+
+        return ret
+        # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
+
 class PredDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
         super(PredDataset, self).__init__()
@@ -318,6 +548,13 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
         elif test_df is not None:
             dfs+=[test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
+    else:
+        if val_df is not None:
+            dfs+=[val_df]
+            transforms_ = [tfms[0], tfms[1]]
+        if test_df is not None:
+            dfs+=[test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
     if ss_tfms is not None:
         if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
     dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, **kwargs,
@@ -338,6 +575,89 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
     else:
         dls.suggested_crit = nn.CrossEntropyLoss()
         dls.suggested_metric = 'accuracy'
+
+    return dls
+
+def get_similarity_dls(df, val_df=None, test_df=None, data_dir='', dset=SimilarityDataset,
+                       tfms=instant_tfms(224, 224), tfms2=None, bs=64, shuffle=True,
+                       pin_memory=True, num_workers=4, force_one_hot=False,
+                       class_names=None, split=True, val_size=0.2, test_size=0.15, **kwargs):
+    # if len(kwargs) > 0:
+        # dset = partial(dset, **kwargs)
+    # if list_or_tuple(dfs):
+    #     df = dfs[0]
+    #     if len(dfs) > 1:
+    #         other_dfs = dfs[1:]
+    #         # ss_df = dfs[-1]
+    # else:
+    #     df = dfs
+    #     other_dfs = []
+    #     # ss_df = None
+    def df_one_hot(df):
+        df = df.copy()
+        labels = list_map(df.iloc[:,1], lambda x:str(x).split())
+        one_hot_labels = dai_one_hot(labels, class_names)
+        df['one_hot'] = list(one_hot_labels)
+        cols = df.columns.to_list()
+        df = df[[cols[0], cols[-1], *cols[1:-1]]]
+        return df
+
+    labels = list_map(df.iloc[:,1], lambda x:str(x).split())
+    is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
+    if class_names is None:
+        class_names = np.unique(flatten_list(labels))
+    class_names = list_map(class_names, str)
+    stratify_idx = 1
+    # ss_transforms = [ss_tfms[0]]
+    if is_multi or force_one_hot:
+        # one_hot_labels = dai_one_hot(labels, class_names)    
+        dfs = [df, val_df, test_df]
+        for i in range(3):
+            if dfs[i] is not None:
+                dfs[i] = df_one_hot(dfs[i])
+        df, val_df, test_df = dfs
+        # df['one_hot'] = list(one_hot_labels)
+        # cols = df.columns.to_list()
+        # df = df[[cols[0], cols[-1], *cols[1:-1]]]
+        stratify_idx = 2
+    dfs = [df]
+    transforms_ = [tfms[0]]
+    if split:
+        if val_df is None:
+            dfs = list(split_df(df, val_size, stratify_idx=stratify_idx))
+            transforms_ = [tfms[0], tfms[1]]
+        elif val_df is not None:
+            dfs+=[val_df]
+            transforms_ = [tfms[0], tfms[1]]
+        if (test_size > 0) and (test_df is None):
+            val_df, test_df = split_df(dfs[1], test_size, stratify_idx=stratify_idx)
+            dfs = [dfs[0], val_df, test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+        elif test_df is not None:
+            dfs+=[test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+    else:
+        if val_df is not None:
+            dfs+=[val_df]
+            transforms_ = [tfms[0], tfms[1]]
+        if test_df is not None:
+            dfs+=[test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+    if ss_tfms is not None:
+        if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, **kwargs,
+                  ss_tfms=ss_tfms, class_names=class_names, meta_idx=meta_idx) for df,tfms_ in zip(dfs, transforms_)]
+    dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+    if split:
+        dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
+    dls = DataLoaders(*dls)
+    dls.class_names = class_names
+    dls.num_classes = len(class_names)
+    dls.is_multi = is_multi
+    dls.data_type = 'similarity'
+    dls.is_one_hot = is_multi + force_one_hot
+    dls.suggested_crit = nn.CosineEmbeddingLoss()
+    dls.suggested_metric = 'loss'
 
     return dls
 
@@ -436,8 +756,10 @@ def get_class_weights(df):
         w = list(df.iloc[:,1].value_counts(normalize=True).sort_index())    
     return 1-tensor(w)
 
-def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32, device='cpu'):
+def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32, device=None):
     
+    if device is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # print('Calculating dataset mean and std. This may take a while.', end='')
     print('Calculating dataset mean and std. This may take a while.\n')
     frac_data = df.sample(frac=stats_percentage).reset_index(drop=True).copy()

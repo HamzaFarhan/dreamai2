@@ -414,8 +414,9 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
     return tfms1, tfms2
 
 def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
-             tensorfy=True, img_mean=None, img_std=None, extra=[]):
+             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True):
 
+    color_tfms = [albu.HueSaturationValue(p=0.3)]
     extra += [
         albu.RandomRotate90(),
         albu.Flip(),
@@ -441,9 +442,10 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
             albu.IAASharpen(),
             albu.IAAEmboss(),
             albu.RandomBrightnessContrast(),            
-        ], p=0.3),
-        albu.HueSaturationValue(p=0.3),
+        ], p=0.3)
     ]
+    if color:
+        extra += color_tfms
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)

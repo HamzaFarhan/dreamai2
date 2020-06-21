@@ -43,7 +43,7 @@ class Callback(GetAttr):
     def after_predict(self): pass
 
 class CheckpointCallback(Callback):
-    def __init__(self, metric='loss', curr_best=None,# save_every=1,
+    def __init__(self, metric='loss', curr_best=None,# save_every=None,
                  save_name='model_checkpoint', best_name='best_model',
                  checkpoint_folder = 'dai_model_checkpoints'):
 
@@ -572,7 +572,7 @@ class Learner:
         if self.print_progress:
             self.print_valid_progress()
     
-    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=1,
+    def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=None,
             load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None, pred_thresh=None,
             class_weights=None, save_best=True, progressive_resizing=None, extra_loss_func=None):
         
@@ -660,7 +660,7 @@ class Learner:
         else:
             do_fit()
 
-    def predict(self, x, pred_thresh=None, device=None):
+    def predict(self, x, dset=PredDataset, pred_thresh=None, device=None, **kwargs):
 
         if pred_thresh is None:
             self.pred_thresh = self.model.pred_thresh
@@ -682,7 +682,7 @@ class Learner:
         dset = dl.dataset
         tfms = dset.tfms
         # tfms = None
-        self.pred_set = PredDataset(x, tfms=tfms)
+        self.pred_set = dset(x, tfms=tfms, **kwargs)
         # pred_dl = DataLoader(self.pred_set, batch_size=bs)
         self.pred_outs = []
         for idx,data_batch in enumerate(self.pred_set):
@@ -692,7 +692,7 @@ class Learner:
 
         return self.pred_outs
 
-    def evaluate(self, dl, metric=None, pred_thresh=None, class_weights=None, device=None):
+    def evaluate(self, dl, metric=None, pred_thresh=None, class_weights=None, tta=None, device=None):
 
         if device is None:
             device = self.model.device
@@ -720,9 +720,20 @@ class Learner:
         y_pred = []
         y_prob = []
         y_true = []
-
         self.model.eval()
         rmse_ = 0.
+
+        if tta is not None:
+            if list_or_tuple(tta):
+                dl_tta = None
+                if hasattr(dl.dataset, 'tta'):
+                    dl_dotta = copy.deepcopy(dl.dataset.do_tta)
+                    dl_tta = copy.deepcopy(dl.dataset.tta)
+                dl.dataset.tta = tta
+                dl.dataset.do_tta = True
+            else:
+                dl.dataset.do_tta = tta
+
         with torch.no_grad():
             for data_batch in dl:
                 loss, outputs = self.model.batch_to_loss(data_batch, backward_step=False, extra_loss_func=self.extra_loss_func,
@@ -798,7 +809,7 @@ class Learner:
         # unfreeze_params(self.model.parameters())
 
 
-    def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=1, save_best=True,
+    def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=None, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
                   print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
                   progressive_resizing=None, extra_loss_func=None):

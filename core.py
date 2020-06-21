@@ -25,6 +25,15 @@ def create_body(arch, pretrained=True, cut=None, num_extra=3):
     modules += extra_convs
     return nn.Sequential(*modules)
 
+class HeadModel(nn.Module):
+    def __init__(self, pool, linear):
+        super().__init__()
+        store_attr(self, 'pool,linear')
+    def forward(self, x, meta=None):
+        if meta is None:
+            return self.linear(self.pool(x))  
+        return self.linear(torch.cat([self.pool(x), meta], dim=1))
+
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
                 bn_final=False, lin_first=False, y_range=None):
     "Model head that takes `nf` features, runs through `lin_ftrs`, and out `n_out` classes."
@@ -33,13 +42,15 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     if len(ps) == 1: ps = [ps[0]/2] * (len(lin_ftrs)-2) + ps
     actns = [nn.ReLU(inplace=True)] * (len(lin_ftrs)-2) + [None]
     pool = AdaptiveConcatPool2d() if concat_pool else nn.AdaptiveAvgPool2d(1)
-    layers = [pool, Flatten()]
+    pool_layers = nn.Sequential(*[pool, Flatten()])
+    layers = []
     if lin_first: layers.append(nn.Dropout(ps.pop(0)))
     for ni,no,p,actn in zip(lin_ftrs[:-1], lin_ftrs[1:], ps, actns):
         layers += LinBnDrop(ni, no, bn=True, p=p, act=actn, lin_first=lin_first)
     if lin_first: layers.append(nn.Linear(lin_ftrs[-2], n_out))
     if bn_final: layers.append(nn.BatchNorm1d(lin_ftrs[-1], momentum=0.01))
-    return nn.Sequential(*layers)
+    layers = nn.Sequential(*layers)
+    return HeadModel(pool=pool_layers, linear=layers)
 
 def create_model(arch, num_classes, num_extra=3, meta_len=0, pretrained=True):
     meta = models_meta[arch]
@@ -253,8 +264,8 @@ class DaiModel(nn.Module):
     def forward(self, x, meta=None):
         if meta is None:
             return self.model(x)
-        ftrs = torch.cat([self.model[0](x), meta], dim=1)
-        return self.model[1](ftrs)
+        # ftrs = torch.cat([flatten_tensor(self.model[0](x)), meta], dim=1)
+        return self.model[1](self.model[0](x), meta=meta)
     
     def compute_loss(self, outputs, labels, class_weights=None, extra_loss_func=None, **kwargs):
         if extra_loss_func is not None:
@@ -474,8 +485,10 @@ class DaiModel(nn.Module):
                     setattr(self, k, checkpoint[k])
 
 class SimilarityModel(DaiModel):
-    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device=None, checkpoint=None, load_opt=False):
-        super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt)
+    def __init__(self, model, opt, crit=nn.CosineEmbeddingLoss(), device=None, checkpoint=None, load_opt=False,
+                 load_crit=False, load_misc=False):
+        super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt,
+                         load_crit=False, load_misc=False)
         # self.model = model.to(device)
         # self.optimizer = opt
         # self.device = device
@@ -484,15 +497,20 @@ class SimilarityModel(DaiModel):
 
         # if checkpoint:
         #     self.load_checkpoint(checkpoint)
-    
-    def forward(self, x1, x2):
-        return self.model(x1), self.model(x2)
+
+    def forward(self, x1, x2=None, mode=0):
+        if mode == 0 and x2 is not None:
+            return flatten_tensor(self.model(x1)), flatten_tensor(self.model(x2))
+        elif mode == 1:
+            return flatten_tensor(self.model(x1))
     
     # def forward(self, x1, x2):
         # ftrs = torch.cat([self.model.encoder(x1), self.model.encoder(x2)], dim=1)
         # return self.model.head(ftrs)
     
     def compute_loss(self, outputs, y):
+        if list_or_tuple(outputs):
+            return self.criterion(*outputs, y)
         return self.criterion(outputs, y)
 
     def process_batch(self, data_batch, device=None):
@@ -513,8 +531,9 @@ class SimilarityModel(DaiModel):
         # img2 = img2.to(device)
         # outputs = self.forward(img1, img2)
         outputs = self.process_batch(data_batch, device=device)
-        y = data_batch['same'] * torch.ones(outputs[0][0].shape[0]).to(device)
-        loss = self.compute_loss(*outputs, y)
+        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(device)
+        # print(y.shape, outputs[0].shape)
+        loss = self.compute_loss(outputs, y)
         if backward_step:
             self.optimizer.zero_grad()
             loss.backward()
@@ -529,8 +548,106 @@ class SimilarityModel(DaiModel):
         # img2 = img2.to(device)
         # outputs = self.forward(img1, img2)
         outputs = self.process_batch(data_batch)
-        y = data_batch['same'] * torch.ones(outputs[0][0].shape[0]).to(device)
-        loss = self.compute_loss(*outputs, y)
+        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(self.device)
+        loss = self.compute_loss(outputs, y)
+        ret['loss'] = loss.item()
+        ret['outputs'] = outputs
+        # if 'accuracy' in metric:
+            # self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
+        
+        return loss.item(), outputs
+
+    def predict(self, x, actv=None, device=None):
+
+        if device is None:
+            device = self.device
+    
+        self.eval()
+        self.model.eval()
+        self.model = self.model.to(device)
+        with torch.no_grad():
+            for i in range(2):
+                # print(x.shape)
+                if is_tensor(x[i]):
+                    if x[i].dim() == 3:
+                        x[i].unsqueeze_(0)
+                elif is_array(x[i]):
+                    x[i] = to_tensor(x[i]).unsqueeze(0)
+                    # print(x)
+                x[i] = x[i].to(device)
+            outputs = self.forward(*x)
+        if actv is not None:
+            return actv(outputs)
+        return outputs
+
+class MatchingModel(DaiModel):
+    def __init__(self, model, opt, crit=nn.CrossEntropyLoss(), device=None, checkpoint=None, load_opt=False,
+                 load_crit=False, load_misc=False):
+        super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt,
+                         load_crit=False, load_misc=False)
+        # self.model = model.to(device)
+        # self.optimizer = opt
+        # self.device = device
+        # self.criterion = crit
+        # self.pred_thresh = pred_thresh
+
+        # if checkpoint:
+        #     self.load_checkpoint(checkpoint)
+    
+    def matcher(self, x1, x2):
+        ftrs = torch.cat([(x1), (x2)], dim=1)
+        return self.model[1](ftrs)
+
+    def extractor(self, x1, x2=None, mode=0):
+        if mode == 0 and x2 is not None:
+            return self.model[0](x1), self.model[0](x2)
+        elif mode == 1:
+            return self.model[0](x1)
+
+    def forward(self, x1, x2):
+        return self.matcher(*self.extractor(x1, x2))
+    
+    def compute_loss(self, outputs, y):
+        if list_or_tuple(outputs):
+            return self.criterion(*outputs, y)
+        return self.criterion(outputs, y)
+
+    def process_batch(self, data_batch, device=None):
+        if device is None:
+            device = self.device
+        # img1,img2 = data_batch[0], data_batch[1]
+        img1,img2 = data_batch['x'], data_batch['x2']
+        img1 = img1.to(device)
+        img2 = img2.to(device)
+        outputs = self.forward(img1, img2)
+        return outputs
+
+    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
+        if device is None:
+            device = self.device
+        # img1,img2 = data_batch['x'], data_batch['x2']
+        # img1 = img1.to(device)
+        # img2 = img2.to(device)
+        # outputs = self.forward(img1, img2)
+        outputs = self.process_batch(data_batch, device=device)
+        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(device)
+        loss = self.compute_loss(outputs, y)
+        if backward_step:
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+        ret = {'loss': loss.item(), 'outputs': outputs}
+        return loss.item(), outputs
+
+    def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
+        ret = {}
+        # img1,img2 = data_batch['x'], data_batch['x2']
+        # img1 = img1.to(device)
+        # img2 = img2.to(device)
+        # outputs = self.forward(img1, img2)
+        outputs = self.process_batch(data_batch)
+        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(self.device)
+        loss = self.compute_loss(outputs, y)
         ret['loss'] = loss.item()
         ret['outputs'] = outputs
         # if 'accuracy' in metric:

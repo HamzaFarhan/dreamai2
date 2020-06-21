@@ -244,11 +244,19 @@ def swap_dict_key(d, x, y, strict=False):
 def swap_state_dict_key_first(sd, x, y):
     return OrderedDict([(y+k[1:], v) if k[0]==x else (k, v) for k, v in sd.items()])
 
-def remove_key(d, x):
+def remove_key(d, fn):
     keys = list(d.keys())
     for k in keys:
-        if x in k:
+        if fn(k):
             del d[k]
+
+def checkpoint_to_model(checkpoint, only_body=False, only_head=False):
+    model_sd = swap_dict_key(checkpoint['model'], 'model.', '')
+    if only_body:
+        remove_key(model_sd, lambda x: x.startswith('1.'))
+    elif only_head:
+        remove_key(model_sd, lambda x: x.startswith('0.'))
+    return model_sd
 
 def split_params(model, n=3):
     return list_map(np.array_split(params(model), n), list)
@@ -932,6 +940,8 @@ def get_image_files(path, recurse=True, folders=None):
     "Get image files in `path` recursively, only in `folders`, if specified."
     return get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
 
+def path_name(x):
+    return x.name
 
 def last_modified(x):
     return x.stat().st_ctime

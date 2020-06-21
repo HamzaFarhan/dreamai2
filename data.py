@@ -5,11 +5,16 @@ class DaiDataset(Dataset):
     
     def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3, meta_idx=None, **kwargs):
         super(DaiDataset, self).__init__()
+        self.tfms_list = []
         self.data_dir = str(data_dir)
         self.data = data
         self.tfms = tfms
         self.ss_tfms = ss_tfms
         self.meta_idx = meta_idx
+        if self.tfms is not None:
+            self.tfms_list.append(self.tfms)
+        if self.ss_tfms is not None:
+            self.tfms_list.append(self.ss_tfms)
         # if tfms is not None:
             # self.tfms = albu.Compose(tfms)
         # else:
@@ -60,15 +65,15 @@ class DaiDataset(Dataset):
             # x2 = apply_tfms(img, self.ss_tfms)
             # if self.channels == 1:
             #     x2 = x2.unsqueeze(0)
-            index = random.choice(range(len(self.data)))
+            index2 = random.choice(range(len(self.data)))
             try:
-                img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+                img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
             except:
-                img_path = os.path.join(self.data_dir, self.data[index, 0])
+                img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
             if self.channels == 3:
-                img2 = rgb_read(img_path)
+                img2 = rgb_read(img_path2)
             else:    
-                img2 = c1_read(img_path)
+                img2 = c1_read(img_path2)
             x2 = apply_tfms(img2.copy(), self.ss_tfms)
             if self.channels == 1:
                 x2 = x2.unsqueeze(0)
@@ -95,7 +100,10 @@ class DaiDataset(Dataset):
                 meta1,meta2 = self.meta_idx, self.meta_idx+1
             else:
                 meta1,meta2 = self.meta_idx
-            ret['meta'] = self.data.iloc[index, meta1:meta2]
+            try:
+                ret['meta'] = torch.cat([tensor(m) for m in self.data.iloc[index, meta1:meta2]]).float()
+            except:
+                ret['meta'] = torch.cat([tensor([m]) for m in self.data.iloc[index, meta1:meta2]]).float()
 
         return ret
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
@@ -141,15 +149,15 @@ class DaiDataset(Dataset):
             #         img = rgb_read(img_path)
             #     else:    
             #         img = c1_read(img_path)
-            index = random.choice(range(len(self.data)))
+            index2 = random.choice(range(len(self.data)))
             try:
-                img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+                img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
             except:
-                img_path = os.path.join(self.data_dir, self.data[index, 0])
+                img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
             if self.channels == 3:
-                img2 = rgb_read(img_path)
+                img2 = rgb_read(img_path2)
             else:    
-                img2 = c1_read(img_path)
+                img2 = c1_read(img_path2)
             x2 = apply_tfms(img2.copy(), self.ss_tfms)
             if self.channels == 1:
                 x2 = x2.unsqueeze(0)
@@ -196,19 +204,26 @@ class DaiDataset(Dataset):
                 meta1,meta2 = self.meta_idx, self.meta_idx+1
             else:
                 meta1,meta2 = self.meta_idx
-            ret['meta'] = self.data.iloc[index, meta1:meta2]
-
+            try:
+                ret['meta'] = torch.cat([tensor(m) for m in self.data.iloc[index, meta1:meta2]])
+            except:
+                ret['meta'] = torch.cat([tensor([m]) for m in self.data.iloc[index, meta1:meta2]])
         return ret
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
 class SimilarityDataset(Dataset):
     
     def __init__(self, data, data_dir='', tfms=None, tfms2=None, channels=3,**kwargs):
-        super(DaiDataset, self).__init__()
+        super(SimilarityDataset, self).__init__()
+        self.tfms_list = []
         self.data_dir = str(data_dir)
         self.data = data
         self.tfms = tfms
         self.tfms2 = tfms2
+        if self.tfms is not None:
+            self.tfms_list.append(self.tfms)
+        if self.tfms2 is not None:
+            self.tfms_list.append(self.tfms2)
         # if tfms is not None:
             # self.tfms = albu.Compose(tfms)
         # else:
@@ -528,6 +543,11 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
             if dfs[i] is not None:
                 dfs[i] = df_one_hot(dfs[i])
         df, val_df, test_df = dfs
+        if meta_idx is not None:
+            if not list_or_tuple(meta_idx):
+                meta_idx+=1
+            else:
+                meta_idx = [m_id+1 for m_id in meta_idx]
         # df['one_hot'] = list(one_hot_labels)
         # cols = df.columns.to_list()
         # df = df[[cols[0], cols[-1], *cols[1:-1]]]
@@ -643,10 +663,8 @@ def get_similarity_dls(df, val_df=None, test_df=None, data_dir='', dset=Similari
         if test_df is not None:
             dfs+=[test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
-    if ss_tfms is not None:
-        if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
     dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, **kwargs,
-                  ss_tfms=ss_tfms, class_names=class_names, meta_idx=meta_idx) for df,tfms_ in zip(dfs, transforms_)]
+                  class_names=class_names) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
@@ -716,24 +734,42 @@ class DataLoaders():
                                    pin_memory=self.test.pin_memory)
 
     def progressive_resize(self, h=224, w=224, bs=32):
-        new_train_dl, new_valid_dl, new_test_dl = None, None, None
-        if self.train:
-            set_resize_dims(self.train_ds.tfms, h=h, w=w)
-            if self.train_ds.ss_tfms is not None:
-                set_resize_dims(self.train_ds.ss_tfms, h=h, w=w)
-            new_train_dl = new_dl(self.train_dl, bs=bs)
-        if self.valid:
-            set_resize_dims(self.valid_ds.tfms, h=h, w=w)
-            if self.valid_ds.ss_tfms is not None:
-                set_resize_dims(self.valid_ds.ss_tfms, h=h, w=w)
-            new_valid_dl = new_dl(self.valid_dl, bs=bs)
-        if self.test:
-            set_resize_dims(self.test_ds.tfms, h=h, w=w)
-            if self.test_ds.ss_tfms is not None:
-                set_resize_dims(self.test_ds.ss_tfms, h=h, w=w)
-            new_test_dl = new_dl(self.test_dl, bs=bs)
+        new_dls = []
+        for dtype in ['train', 'valid', 'test']:
+            if getattr(self, dtype):
+                ds = getattr(self, f'{dtype}_ds')
+                if hasattr(ds, 'tfms_list'):
+                    if len(ds.tfms_list) > 0:
+                        for t in ds.tfms_list:
+                            set_resize_dims(t, h=h, w=w)
+                elif hasattr(ds, 'tfms'):
+                    set_resize_dims(ds.tfms, h=h, w=w)
+                new_dls.append(new_dl(getattr(self, f'{dtype}_dl'), bs=bs))
+        self.assign_dls(*new_dls)
 
-        self.assign_dls(new_train_dl, new_valid_dl, new_test_dl)
+    # def progressive_resize(self, h=224, w=224, bs=32):
+    #     new_train_dl, new_valid_dl, new_test_dl = None, None, None
+
+    #     if self.train:
+    #         # set_resize_dims(self.train_ds.tfms, h=h, w=w)
+    #         # if self.train_ds.ss_tfms is not None:
+    #         if len(self.train_ds.tfms_list) > 0:
+    #             for t in self.train_ds.tfms_list:
+    #                 # set_resize_dims(self.train_ds.ss_tfms, h=h, w=w)
+    #                 set_resize_dims(t, h=h, w=w)
+    #         new_train_dl = new_dl(self.train_dl, bs=bs)
+    #     if self.valid:
+    #         set_resize_dims(self.valid_ds.tfms, h=h, w=w)
+    #         if self.valid_ds.ss_tfms is not None:
+    #             set_resize_dims(self.valid_ds.ss_tfms, h=h, w=w)
+    #         new_valid_dl = new_dl(self.valid_dl, bs=bs)
+    #     if self.test:
+    #         set_resize_dims(self.test_ds.tfms, h=h, w=w)
+    #         if self.test_ds.ss_tfms is not None:
+    #             set_resize_dims(self.test_ds.ss_tfms, h=h, w=w)
+    #         new_test_dl = new_dl(self.test_dl, bs=bs)
+
+    #     self.assign_dls(new_train_dl, new_valid_dl, new_test_dl)
 
     def __len__(self):
         return sum([(self.train!=None) + (self.valid!=None) + (self.test!=None)])
@@ -762,7 +798,7 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # print('Calculating dataset mean and std. This may take a while.', end='')
     print('Calculating dataset mean and std. This may take a while.\n')
-    frac_data = df.sample(frac=stats_percentage).reset_index(drop=True).copy()
+    frac_data = df.copy().sample(frac=stats_percentage).reset_index(drop=True).copy()
     tfms = instant_tfms(image_size, image_size)[1]
     dset = DaiDataset(frac_data, data_dir=data_dir, tfms=tfms)
     dl = DataLoader(dset, batch_size=bs, num_workers=4)
@@ -771,7 +807,10 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
     mean = 0.0
     print('Mean loop:')
     for i,data_batch in enumerate(dl):
-        if i % (batches//10) == 0:
+        try:
+            if i % (batches//10) == 0:
+                print(f'Batch: {i+1}/{batches}')
+        except:
             print(f'Batch: {i+1}/{batches}')
         # images = data_batch[0]
         images = data_batch['x'].to(device)
@@ -783,7 +822,10 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
     var = 0.0
     print('\nStd loop:')
     for i,data_batch in enumerate(dl):
-        if i % (batches//10) == 0:
+        try:
+            if i % (batches//10) == 0:
+                print(f'Batch: {i+1}/{batches}')
+        except:
             print(f'Batch: {i+1}/{batches}')
         # images = data_batch[0]
         images = data_batch['x'].to(device)

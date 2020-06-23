@@ -298,9 +298,12 @@ class DaiModel(nn.Module):
         if device is None:
             device = self.device
         # inputs,labels = data_batch[0], data_batch[1]
-        inputs,labels = data_batch['x'], data_batch['label']
+        inputs = data_batch['x']
         inputs = inputs.to(device)
-        labels = labels.to(device)
+        labels = None
+        if 'label' in data_batch.keys():
+            labels = data_batch['label']
+            labels = labels.to(device)
         meta = None
         if 'meta' in data_batch.keys():
             meta = data_batch['meta'].to(device)
@@ -430,14 +433,17 @@ class DaiModel(nn.Module):
         self.model = self.model.to(device)
         with torch.no_grad():
             # print(x.shape)
-            if is_tensor(x):
-                if x.dim() == 3:
-                    x.unsqueeze_(0)
-            elif is_array(x):
-                x = to_tensor(x).unsqueeze(0)
-                # print(x)
-            x = x.to(device)
-            outputs = self.forward(x)
+            if is_dict(x):
+                outputs,_ = self.process_batch(x, device=device)
+            else:
+                if is_tensor(x):
+                    if x.dim() == 3:
+                        x.unsqueeze_(0)
+                elif is_array(x):
+                    x = to_tensor(x).unsqueeze(0)
+                    # print(x)
+                x = x.to(device)
+                outputs = self.forward(x)
         if actv is not None:
             return actv(outputs)
         return outputs

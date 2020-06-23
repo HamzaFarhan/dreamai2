@@ -660,39 +660,97 @@ class Learner:
         else:
             do_fit()
 
-    def predict(self, x, dset=PredDataset, pred_thresh=None, device=None, **kwargs):
+    def predict(self, x,pred_thresh=None, device=None, meta_dix=None, do_tta=False, tta=None, num_tta=3, **kwargs):
 
         if pred_thresh is None:
             self.pred_thresh = self.model.pred_thresh
         else:
             self.pred_thresh = pred_thresh
 
-        if is_df(x):
-            x = list(x.iloc[:,0])
-        elif is_array(x):
+        # if is_df(x):
+            # x = list(x.iloc[:,0])
+        if is_array(x):
             if x.ndim == 3:
                 x = [x]
             else:
                 x = list(x)
+            x = pd.DataFrame({'x': x}, columns='x')
         elif is_tensor(x):
             x = tensor_to_img(x)
             if is_array(x):
                 x = [x]
+            x = pd.DataFrame({'x': x}, columns='x')
         dl = self.dls.test
         dset = dl.dataset
         tfms = dset.tfms
+
+        if tta is not None and not list_or_tuple(tta):
+            tta = [tta]*num_tta
         # tfms = None
-        self.pred_set = dset(x, tfms=tfms, **kwargs)
+        self.pred_set = PredDataset(x, tfms=tfms, meta_idx=meta_dix, do_tta=do_tta, tta=tta, **kwargs)
         # pred_dl = DataLoader(self.pred_set, batch_size=bs)
         self.pred_outs = []
         for idx,data_batch in enumerate(self.pred_set):
-            self.pred_out = self.model.predict(data_batch, device=device)
+            if list_or_tuple(data_batch):
+                for db in data_batch:
+                    batchify_dict(db)
+                self.pred_out = self.tta_predict(data_batch, device=device)
+            else:
+                batchify_dict(data_batch)
+                self.pred_out = self.model.predict(data_batch, device=device)
             self('after_predict')
             self.pred_outs.append(self.pred_out)
 
         return self.pred_outs
 
-    def evaluate(self, dl, metric=None, pred_thresh=None, class_weights=None, tta=None, device=None):
+    # def predict(self, x,pred_thresh=None, device=None, **kwargs):
+
+    #     if pred_thresh is None:
+    #         self.pred_thresh = self.model.pred_thresh
+    #     else:
+    #         self.pred_thresh = pred_thresh
+
+    #     if is_df(x):
+    #         x = list(x.iloc[:,0])
+    #     elif is_array(x):
+    #         if x.ndim == 3:
+    #             x = [x]
+    #         else:
+    #             x = list(x)
+    #     elif is_tensor(x):
+    #         x = tensor_to_img(x)
+    #         if is_array(x):
+    #             x = [x]
+    #     dl = self.dls.test
+    #     dset = dl.dataset
+    #     tfms = dset.tfms
+    #     # tfms = None
+    #     self.pred_set = PredDataset(x, tfms=tfms, **kwargs)
+    #     # pred_dl = DataLoader(self.pred_set, batch_size=bs)
+    #     self.pred_outs = []
+    #     for idx,data_batch in enumerate(self.pred_set):
+    #         self.pred_out = self.model.predict(data_batch, device=device)
+    #         self('after_predict')
+    #         self.pred_outs.append(self.pred_out)
+
+    #     return self.pred_outs
+
+    def tta_batch_to_loss(self, data_batches, class_weights=None, device=None):
+        loss_outs = [self.model.batch_to_loss(data_batch, backward_step=False, extra_loss_func=self.extra_loss_func,
+                     class_weights=class_weights, device=device) for data_batch in data_batches]
+        outputs = torch.stack([(lo[1]/(len(loss_outs))) for lo in loss_outs])
+        outputs = torch.sum(outputs, dim=0)
+        loss = torch.stack([(lo[0]/(len(loss_outs))) for lo in loss_outs])
+        loss = torch.sum(loss, dim=0)
+        return loss, outputs
+
+    def tta_predict(self, data_batches, device=None):
+        preds = [self.model.predict(data_batch, device=device) for data_batch in data_batches]
+        preds = torch.stack([(p/(len(preds))) for p in preds])
+        preds = torch.sum(preds, dim=0)
+        return preds
+
+    def evaluate(self, dl, metric=None, pred_thresh=None, class_weights=None, do_tta=False, tta=None, num_tta=3, device=None):
 
         if device is None:
             device = self.model.device
@@ -723,21 +781,27 @@ class Learner:
         self.model.eval()
         rmse_ = 0.
 
+        do_tta_ = None
+        tta_ = None
+        if hasattr(dl.dataset, 'do_tta'):
+            do_tta_ = copy.deepcopy(dl.dataset.do_tta)
+        dl.dataset.do_tta = do_tta
+
         if tta is not None:
-            if list_or_tuple(tta):
-                dl_tta = None
-                if hasattr(dl.dataset, 'tta'):
-                    dl_dotta = copy.deepcopy(dl.dataset.do_tta)
-                    dl_tta = copy.deepcopy(dl.dataset.tta)
-                dl.dataset.tta = tta
-                dl.dataset.do_tta = True
-            else:
-                dl.dataset.do_tta = tta
+            if not list_or_tuple(tta):
+                tta = [tta]*num_tta
+            if hasattr(dl.dataset, 'tta'):
+                tta_ = copy.deepcopy(dl.dataset.tta)
+            dl.dataset.tta = tta
 
         with torch.no_grad():
             for data_batch in dl:
-                loss, outputs = self.model.batch_to_loss(data_batch, backward_step=False, extra_loss_func=self.extra_loss_func,
-                                                         class_weights=class_weights, device=device)
+                if list_or_tuple(data_batch):
+                    loss, outputs = self.tta_batch_to_loss(data_batch, class_weights=class_weights, device=device)
+                else:
+                    loss, outputs = self.model.batch_to_loss(data_batch, backward_step=False,
+                                                             extra_loss_func=self.extra_loss_func,
+                                                             class_weights=class_weights, device=device)
                 running_loss += loss
                 if classifier is not None:
                     # labels = data_batch[1].to(device)
@@ -763,7 +827,10 @@ class Learner:
                     rmse_ += rmse(outputs,labels).cpu().numpy()
             
         self.model.train()
-
+        if tta_ is not None:
+            dl.dataset.tta = tta_
+        if do_tta_ is not None:
+            dl.dataset.do_tta = do_tta_
         ret = {}
         # print('Running_loss: {:.3f}'.format(running_loss))
         if metric == 'rmse':

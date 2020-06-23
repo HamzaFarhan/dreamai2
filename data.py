@@ -3,7 +3,8 @@ from .dai_imports import *
 
 class DaiDataset(Dataset):
     
-    def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3, meta_idx=None, **kwargs):
+    def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3,
+                 meta_idx=None, do_tta=False, tta=None,  **kwargs):
         super(DaiDataset, self).__init__()
         self.tfms_list = []
         self.data_dir = str(data_dir)
@@ -11,6 +12,8 @@ class DaiDataset(Dataset):
         self.tfms = tfms
         self.ss_tfms = ss_tfms
         self.meta_idx = meta_idx
+        self.do_tta = do_tta
+        self.tta = tta
         if self.tfms is not None:
             self.tfms_list.append(self.tfms)
         if self.ss_tfms is not None:
@@ -40,7 +43,16 @@ class DaiDataset(Dataset):
         try:
             y = self.data.iloc[index, 1]
         except:
-            y = self.data[index, 1]
+            y = self.data[index, 1]                    
+
+        if is_str(y) and hasattr(self, 'class_names'):
+            y = self.class_names.index(y)
+
+        if self.do_tta:
+            if self.tta is not None:
+                ret_tta = [{'x':apply_tfms(img.copy(),t), 'label':y, 'path':self.data.iloc[index, 0]} for t in self.tta]
+                return ret_tta
+
         if self.tfms is not None:
             x = apply_tfms(img.copy(), self.tfms)
             # x = self.tfms(image=img)['image']
@@ -48,9 +60,9 @@ class DaiDataset(Dataset):
                 x = x.unsqueeze(0)
         else:
             x = img
-        if is_str(y) and hasattr(self, 'class_names'):
-            y = self.class_names.index(y)
+        
         ret = {'x':x, 'label':y, 'path':self.data.iloc[index, 0]}
+
         if self.ss_tfms is not None:
             # if self.ss_data is not None:
             #     try:
@@ -101,9 +113,9 @@ class DaiDataset(Dataset):
             else:
                 meta1,meta2 = self.meta_idx
             try:
-                ret['meta'] = torch.cat([tensor(m) for m in self.data.iloc[index, meta1:meta2]]).float()
+                ret['meta'] = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
             except:
-                ret['meta'] = torch.cat([tensor([m]) for m in self.data.iloc[index, meta1:meta2]]).float()
+                ret['meta'] = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
 
         return ret
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
@@ -447,25 +459,34 @@ class SimilarityDataset(Dataset):
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
 class PredDataset(Dataset):
-    def __init__(self, data, data_dir='', tfms=None, channels=3, **kwargs):
+    def __init__(self, data, data_dir='', tfms=None, channels=3, meta_idx=None,
+                 do_tta=False, tta=None, **kwargs):
         super(PredDataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
         self.tfms = tfms
         self.channels = 3
+        self.meta_idx = meta_idx
+        self.do_tta = do_tta
+        self.tta = tta
         for k in kwargs:
             setattr(self, k, kwargs[k])
     
     def __getitem__(self, index):
 
         try:
-            img_path = os.path.join(self.data_dir, self.data[index])
+            img_path = os.path.join(self.data_dir, self.data.iloc[index,0])
             if self.channels == 3:
                 img = rgb_read(img_path)
             else:    
                 img = c1_read(img_path)
         except:
-            img = self.data[index]
+            img = self.data.iloc[index,0]
+
+        if self.do_tta:
+            if self.tta is not None:
+                ret_tta = [{'x':apply_tfms(img.copy(),t)} for t in self.tta]
+                return ret_tta
 
         if self.tfms is not None:
             x = self.tfms(image=img)['image']
@@ -473,7 +494,18 @@ class PredDataset(Dataset):
                 x = x.unsqueeze(0)
         else:
             x = img
-        return x
+        ret = {}
+        ret['x'] = x
+        if self.meta_idx is not None:
+            if not list_or_tuple(self.meta_idx):
+                meta1,meta2 = self.meta_idx, self.meta_idx+1
+            else:
+                meta1,meta2 = self.meta_idx
+            try:
+                ret['meta'] = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+            except:
+                ret['meta'] = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+        return ret
 
     def __len__(self): return len(self.data)
 
@@ -508,7 +540,8 @@ class dai_classifier_dataset(Dataset):
 def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
                        tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
                        pin_memory=True, num_workers=4, force_one_hot=False, meta_idx=None,
-                       class_names=None, split=True, val_size=0.2, test_size=0.15, **kwargs):
+                       class_names=None, split=True, val_size=0.2, test_size=0.15,
+                       tta=None, num_tta=3, **kwargs):
     # if len(kwargs) > 0:
         # dset = partial(dset, **kwargs)
     # if list_or_tuple(dfs):
@@ -520,6 +553,10 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
     #     df = dfs
     #     other_dfs = []
     #     # ss_df = None
+
+    if tta is not None and not list_or_tuple(tta):
+        tta = [tta]*num_tta
+
     def df_one_hot(df):
         df = df.copy()
         labels = list_map(df.iloc[:,1], lambda x:str(x).split())
@@ -577,7 +614,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
             transforms_ = [tfms[0], tfms[1], tfms[1]]
     if ss_tfms is not None:
         if list_or_tuple(ss_tfms): ss_tfms = ss_tfms[0]
-    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, **kwargs,
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, tta=tta, **kwargs,
                   ss_tfms=ss_tfms, class_names=class_names, meta_idx=meta_idx) for df,tfms_ in zip(dfs, transforms_)]
     dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     if split:

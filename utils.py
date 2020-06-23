@@ -285,6 +285,9 @@ def is_tuple(x):
 def list_or_tuple(x):
     return (is_list(x) or is_tuple(x))
 
+def is_dict(x):
+    return isinstance(x, dict)
+
 def is_df(x):
     return isinstance(x, pd.core.frame.DataFrame)
 
@@ -359,6 +362,10 @@ def to_tensor(x):
     if type(x) == list:
         return [t(image=i)['image'] for i in x]
     return t(image=x)['image']
+
+def batchify_dict(d):
+    for k in d.keys():
+        d[k].unsqueeze_(0)
 
 def store_attr(self, nms):
     "Store params named in comma-separated `nms` from calling context into attrs in `self`"

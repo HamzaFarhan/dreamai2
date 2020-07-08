@@ -660,7 +660,8 @@ class Learner:
         else:
             do_fit()
 
-    def predict(self, x,pred_thresh=None, device=None, meta_dix=None, do_tta=False, tta=None, num_tta=3, **kwargs):
+    def predict(self, x, pred_dset=PredDataset, pred_thresh=None, device=None, meta_dix=None,
+                do_tta=False, tta=None, num_tta=3, **kwargs):
 
         if pred_thresh is None:
             self.pred_thresh = self.model.pred_thresh
@@ -674,12 +675,12 @@ class Learner:
                 x = [x]
             else:
                 x = list(x)
-            x = pd.DataFrame({'x': x}, columns='x')
+            x = pd.DataFrame({'x': x}, columns=['x'])
         elif is_tensor(x):
             x = tensor_to_img(x)
             if is_array(x):
                 x = [x]
-            x = pd.DataFrame({'x': x}, columns='x')
+            x = pd.DataFrame({'x': x}, columns=['x'])
         dl = self.dls.test
         dset = dl.dataset
         tfms = dset.tfms
@@ -687,10 +688,11 @@ class Learner:
         if tta is not None and not list_or_tuple(tta):
             tta = [tta]*num_tta
         # tfms = None
-        self.pred_set = PredDataset(x, tfms=tfms, meta_idx=meta_dix, do_tta=do_tta, tta=tta, **kwargs)
+        self.pred_set = pred_dset(x, tfms=tfms, meta_idx=meta_dix, do_tta=do_tta, tta=tta, num_tta=num_tta, **kwargs)
         # pred_dl = DataLoader(self.pred_set, batch_size=bs)
         self.pred_outs = []
         for idx,data_batch in enumerate(self.pred_set):
+            self('before_predict')
             if list_or_tuple(data_batch):
                 for db in data_batch:
                     batchify_dict(db)
@@ -793,7 +795,7 @@ class Learner:
             if hasattr(dl.dataset, 'tta'):
                 tta_ = copy.deepcopy(dl.dataset.tta)
             dl.dataset.tta = tta
-
+        dl.dataset.num_tta = num_tta
         with torch.no_grad():
             for data_batch in dl:
                 if list_or_tuple(data_batch):

@@ -2,28 +2,71 @@ from .utils import *
 from .plot_eval import *
 from .dai_imports import *
 
+def efficientnet_b0(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b0',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b2(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b2',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b4(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b4',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b5(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b5',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b6(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b6',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b7(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b7',
+           num_classes=num_channels, in_channels=in_channels)
+
 models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
                resnet50: {'cut': -2, 'conv_channels': 2048},
                resnet101: {'cut': -2, 'conv_channels': 2048},
                resnext50_32x4d: {'cut': -2, 'conv_channels': 2048},
                resnext101_32x8d: {'cut': -2, 'conv_channels': 2048},
-               densenet121: {'cut': -1, 'conv_channels': 1024}}
+               densenet121: {'cut': -1, 'conv_channels': 1024},
+               efficientnet_b0: {'cut': -5, 'conv_channels': 1280},
+               efficientnet_b2: {'cut': -5, 'conv_channels': 1408},
+               efficientnet_b4: {'cut': -5, 'conv_channels': 1792},
+               efficientnet_b5: {'cut': -5, 'conv_channels': 2048},
+               efficientnet_b6: {'cut': -5, 'conv_channels': 2304},
+               efficientnet_b7: {'cut': -5, 'conv_channels': 2560}}
 
 imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
 DEFAULTS = {'models_meta': models_meta, 'metrics': ['loss', 'accuracy', 'multi_accuracy'],
             'imagenet_stats': imagenet_stats, 'image_extensions': image_extensions}
 
+class BodyModel(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x):
+        if isinstance(self.model, EfficientNet):
+            return self.model.extract_features(x)
+        return self.model(x)
+
 def create_body(arch, pretrained=True, cut=None, num_extra=3):
     model = arch(pretrained=pretrained)
-    if cut is None:
-        ll = list(enumerate(model.children()))
-        cut = next(i for i,o in reversed(ll) if has_pool_type(o))
-    modules = list(model.children())[:cut]
-    channels = models_meta[arch]['conv_channels']
-    extra_convs = [conv_block(channels, channels)]*num_extra
-    modules += extra_convs
-    return nn.Sequential(*modules)
+    if isinstance(model, EfficientNet):
+        body_model = BodyModel(model)
+    else:
+        if cut is None:
+            ll = list(enumerate(model.children()))
+            cut = next(i for i,o in reversed(ll) if has_pool_type(o))
+        modules = list(model.children())[:cut]
+        body_model = BodyModel(nn.Sequential(*modules))
+    if num_extra > 0:
+        channels = models_meta[arch]['conv_channels']
+        extra_convs = [conv_block(channels, channels)]*num_extra
+        extra_model = nn.Sequential(*extra_convs)
+        body_model = nn.Sequential(body_model, extra_model)
+    else:
+        body_model = nn.Sequential(body_model)
+    return body_model
 
 class HeadModel(nn.Module):
     def __init__(self, pool, linear):
@@ -52,12 +95,45 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     layers = nn.Sequential(*layers)
     return HeadModel(pool=pool_layers, linear=layers)
 
-def create_model(arch, num_classes, num_extra=3, meta_len=0, pretrained=True):
+def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1, pretrained=True):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
-    head = create_head(nf=(meta['conv_channels']*2)+meta_len, n_out=num_classes)
+    head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes)
     net = nn.Sequential(body, head)
     return net
+
+# def model_splitter(model, extra_cut=3, only_body=False):
+#     if not only_body:
+#         if extra_cut != 0:
+#             return params(model[0][:-extra_cut]), params(model[0][-extra_cut:]) + params(model[1])
+#         return params(model[0]), params(model[1])
+#     if extra_cut == 0:
+#         extra_cut = len(params(model))//6
+#     return params(model[:-extra_cut]), params(model[-extra_cut:])
+
+def model_splitter(model, cut_percentage=0.2, only_body=False):
+    
+    if not only_body:
+        ret1, ret2 = params(model[0]), params(model[1])            
+        p = params(model[0][0])
+        cut = int(len(p)*(1-cut_percentage))
+        ret1 = p[:cut]
+        ret2 = p[cut:] + params(model[1])
+        if len(model[0]) > 1:
+            # print('yeesdsssss')
+            ret2 += params(model[0][1])
+        return ret1, ret2
+
+    if cut_percentage == 0.:
+        print("Must pass a cut percentage in the case of 'only_body'. Setting it to 0.2.")
+        cut_percentage = 0.2
+    p = params(model[0])
+    cut = int(len(p)*(1-cut_percentage))
+    ret1 = p[:cut]
+    ret2 = p[cut:]
+    if len(model) > 1:
+        ret2 += params(model[1])
+    return ret1,ret2
 
 class LinBnDrop(nn.Sequential):
     "Module grouping `BatchNorm1d`, `Dropout` and `Linear` layers"
@@ -248,7 +324,7 @@ class BasicModel(nn.Module):
 
 class DaiModel(nn.Module):
     def __init__(self, model, opt=None, crit=nn.BCEWithLogitsLoss(), pred_thresh=0.5,
-                 device=None, checkpoint=None, load_opt=False, load_crit=False, load_misc=False):
+                 device=None, checkpoint=None, load_opt=False, load_crit=False, load_misc=False, **kwargs):
         super().__init__()
         if device is None:
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -286,7 +362,7 @@ class DaiModel(nn.Module):
                 setattr(self.criterion, 'reduction', r)
                 return loss
             elif is_cross_entropy(self.criterion):
-                w = getattr(self.criterion, weight)
+                w = getattr(self.criterion, 'weight')
                 setattr(self.criterion, 'weight', class_weights)
                 loss = self.criterion(outputs, labels)
                 setattr(self.criterion, 'weight', w)
@@ -563,7 +639,7 @@ class SimilarityModel(DaiModel):
         
         return loss.item(), outputs
 
-    def predict(self, x, actv=None, device=None):
+    def predict(self, x, actv=None, device=None, **kwargs):
 
         if device is None:
             device = self.device
@@ -572,34 +648,37 @@ class SimilarityModel(DaiModel):
         self.model.eval()
         self.model = self.model.to(device)
         with torch.no_grad():
-            for i in range(2):
-                # print(x.shape)
-                if is_tensor(x[i]):
-                    if x[i].dim() == 3:
-                        x[i].unsqueeze_(0)
-                elif is_array(x[i]):
-                    x[i] = to_tensor(x[i]).unsqueeze(0)
-                    # print(x)
-                x[i] = x[i].to(device)
-            outputs = self.forward(*x)
+            if is_dict(x):
+                outputs = self.process_batch(x, device=device)
+            else:
+                for i in range(2):
+                    # print(x.shape)
+                    if is_tensor(x[i]):
+                        if x[i].dim() == 3:
+                            x[i].unsqueeze_(0)
+                    elif is_array(x[i]):
+                        x[i] = to_tensor(x[i]).unsqueeze(0)
+                        # print(x)
+                    x[i] = x[i].to(device)
+                outputs = self.forward(*x)
         if actv is not None:
             return actv(outputs)
         return outputs
+
+    def get_embeddings(self, x, device=None):
+        self.eval()
+        self.model.eval()
+        if device is None:
+            device = self.device
+        x = x['x'].to(device)
+        self.model = self.model.to(device)
+        return flatten_tensor(self.model(x))
 
 class MatchingModel(DaiModel):
     def __init__(self, model, opt, crit=nn.CrossEntropyLoss(), device=None, checkpoint=None, load_opt=False,
                  load_crit=False, load_misc=False):
         super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt,
                          load_crit=False, load_misc=False)
-        # self.model = model.to(device)
-        # self.optimizer = opt
-        # self.device = device
-        # self.criterion = crit
-        # self.pred_thresh = pred_thresh
-
-        # if checkpoint:
-        #     self.load_checkpoint(checkpoint)
-    
     def matcher(self, x1, x2):
         ftrs = torch.cat([(x1), (x2)], dim=1)
         return self.model[1](ftrs)
@@ -613,10 +692,8 @@ class MatchingModel(DaiModel):
     def forward(self, x1, x2):
         return self.matcher(*self.extractor(x1, x2))
     
-    def compute_loss(self, outputs, y):
-        if list_or_tuple(outputs):
-            return self.criterion(*outputs, y)
-        return self.criterion(outputs, y)
+    def compute_loss(self, outputs, labels):
+        return self.criterion(outputs, labels)
 
     def process_batch(self, data_batch, device=None):
         if device is None:
@@ -626,18 +703,15 @@ class MatchingModel(DaiModel):
         img1 = img1.to(device)
         img2 = img2.to(device)
         outputs = self.forward(img1, img2)
-        return outputs
+        labels = data_batch['label']
+        labels = labels.to(device)
+        return outputs, labels
 
     def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
         if device is None:
             device = self.device
-        # img1,img2 = data_batch['x'], data_batch['x2']
-        # img1 = img1.to(device)
-        # img2 = img2.to(device)
-        # outputs = self.forward(img1, img2)
-        outputs = self.process_batch(data_batch, device=device)
-        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(device)
-        loss = self.compute_loss(outputs, y)
+        outputs, labels = self.process_batch(data_batch, device=device)
+        loss = self.compute_loss(outputs, labels)
         if backward_step:
             self.optimizer.zero_grad()
             loss.backward()
@@ -647,17 +721,12 @@ class MatchingModel(DaiModel):
 
     def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
         ret = {}
-        # img1,img2 = data_batch['x'], data_batch['x2']
-        # img1 = img1.to(device)
-        # img2 = img2.to(device)
-        # outputs = self.forward(img1, img2)
-        outputs = self.process_batch(data_batch)
-        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(self.device)
-        loss = self.compute_loss(outputs, y)
+        outputs, labels = self.process_batch(data_batch)
+        loss = self.compute_loss(outputs, labels)
         ret['loss'] = loss.item()
         ret['outputs'] = outputs
-        # if 'accuracy' in metric:
-            # self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
+        if 'accuracy' in metric:
+            self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
         
         return loss.item(), outputs
 

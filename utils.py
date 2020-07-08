@@ -10,6 +10,9 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 # DEFAULTS = {'image_extensions': image_extensions}
 
+def default_device():
+    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 def save_obj(path, obj):
     with open(path, 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
@@ -17,6 +20,16 @@ def save_obj(path, obj):
 def load_obj(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
+
+def np_to_parquet(arr, file_name='test.parquet'):
+    arr = list(arr.copy())
+    pdf = pd.DataFrame({'data':arr})
+    # display(pdf)
+    pdf.to_parquet(file_name)
+    
+def parquet_to_np(file_name='test.parquet'):
+    pdf = pd.read_parquet(file_name)
+    return np.array(pdf['data'])
 
 def display_img_actual_size(im_data, title=''):
     dpi = 80
@@ -182,6 +195,27 @@ def smooth_labels(labels,eps=0.1):
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
 
+def add_extension_(x, data_path='', ext='.jpg', do_str=True):
+    if ext[0] != '.': ext = '.'+ext
+    x = Path(data_path)/(x+ext)
+    if do_str:
+        str(x)
+    return x
+
+def add_extension(l, data_path='', ext='.jpg', do_str=True):
+    fn = partial(add_extension_, data_path=data_path, ext=ext, do_str=do_str)
+    return list_map(l, fn)
+
+def df_more_than_count(df, label='label', count=1):
+    return df.copy().groupby(label).filter(lambda x : len(x)>count).reset_index(drop=True)
+
+def df_remove_not_exists(df, col='img'):
+    df2 = df.copy()
+    for i,img in enumerate(list(df2[col])):
+        if not Path(img).exists():
+            df2 = df2.drop(i)
+    return df2.reset_index(drop=True)
+
 def df_classes(df):
     return np.unique(flatten_list([str(x).split() for x in list(df.iloc[:,1])]))
 
@@ -195,6 +229,16 @@ def split_df(train_df, test_size=0.15, stratify_idx=1, seed=2):
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)
     return train_df,val_df  
+
+def df_row_to_cols(df, idx=0):
+    return df.copy().rename(columns=df.iloc[0]).drop(df.index[0]).dropna().reset_index(drop=True)
+
+def shift_df_col(df, id1=-1, id2=1):
+    cols = df.columns.to_list()
+    if id1 < 0:
+        id1 = len(cols)+id1
+    df2 = df.copy()[[*cols[:id2], cols[id1], *cols[id2:id1], *cols[id1+1:]]]
+    return df2
 
 def dai_one_hot(labels, class_names):
     return [(np.in1d(list(class_names), l)*1.) for l in labels]
@@ -236,6 +280,9 @@ def folders_to_df(path, imgs_repeat=False):
     df = pd.DataFrame(dd, columns=['imgs', 'labels'])
     return df
 
+def dict_values(d):
+    return list(d.values())
+
 def swap_dict_key(d, x, y, strict=False):
     if strict:
         return OrderedDict([(k.replace(x, y), v) if x == k else (k, v) for k, v in d.items()])    
@@ -244,18 +291,21 @@ def swap_dict_key(d, x, y, strict=False):
 def swap_state_dict_key_first(sd, x, y):
     return OrderedDict([(y+k[1:], v) if k[0]==x else (k, v) for k, v in sd.items()])
 
-def remove_key(d, fn):
+def remove_key_fn(d, fn):
     keys = list(d.keys())
     for k in keys:
         if fn(k):
             del d[k]
 
-def checkpoint_to_model(checkpoint, only_body=False, only_head=False):
-    model_sd = swap_dict_key(checkpoint['model'], 'model.', '')
+def del_key(d, k):
+    del d[k]
+
+def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
+    model_sd = swap_dict_key(checkpoint['model'], swap_x, swap_y)
     if only_body:
-        remove_key(model_sd, lambda x: x.startswith('1.'))
+        remove_key_fn(model_sd, lambda x: x.startswith('1.'))
     elif only_head:
-        remove_key(model_sd, lambda x: x.startswith('0.'))
+        remove_key_fn(model_sd, lambda x: x.startswith('0.'))
     return model_sd
 
 def split_params(model, n=3):
@@ -284,6 +334,9 @@ def is_tuple(x):
 
 def list_or_tuple(x):
     return (is_list(x) or is_tuple(x))
+
+def is_iterable(x):
+    return list_or_tuple(x) or is_array(x)
 
 def is_dict(x):
     return isinstance(x, dict)
@@ -324,6 +377,9 @@ def get_norm(tfms):
         if is_norm(t):
             return t
     return False
+
+def is_sequential(x):
+    return isinstance(x, nn.Sequential)
 
 def is_resize(x):
     return ('Resize' in type(x).__name__) or ('resize' in type(x).__name__)
@@ -416,7 +472,7 @@ def params(m):
     return [p for p in m.parameters()]
 
 def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
-                 tensorfy=True, img_mean=None, img_std=None, extra=[]):
+                 tensorfy=True, img_mean=None, img_std=None, extra=[], test_tfms=True):
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
@@ -426,10 +482,12 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
     tfms2 = [test_resize(height=h, width=w), normalize, t]
     tfms1 = albu.Compose(tfms1)
     tfms2 = albu.Compose(tfms2)
-    return tfms1, tfms2
+    if test_tfms:
+        return tfms1, tfms2
+    return tfms1
 
 def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
-             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True):
+             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True, test_tfms=True):
 
     color_tfms = [albu.HueSaturationValue(p=0.3)]
     extra += [
@@ -470,13 +528,17 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
     tfms2 = [test_resize(height=h, width=w), normalize, t]
     tfms1 = albu.Compose(tfms1)
     tfms2 = albu.Compose(tfms2)
-    return tfms1, tfms2
+    if test_tfms:
+        return tfms1, tfms2
+    return tfms1
 
-def jigsaw_tfms(tfms1, tfms2):
+def jigsaw_tfms(tfms1, tfms2=None, index=-2):
     tfms = copy.deepcopy(tfms1)
     # tfms.transforms.transforms.insert(0, albu.RandomGridShuffle(p=1.))
-    tfms.transforms.transforms.insert(-2, albu.RandomGridShuffle(p=1.))
-    return tfms, tfms2
+    tfms.transforms.transforms.insert(index, albu.RandomGridShuffle(p=1.))
+    if tfms2 is not None:
+        return tfms, tfms2
+    return tfms
 
 def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resize,
              tensorfy=True, img_mean=None, img_std=None, aug_n=4, aug_m=1):
@@ -929,8 +991,9 @@ def get_files(path, extensions=None, recurse=True, folders=None, followlinks=Tru
     if folders is None:
         folders = list([])
     path = Path(path)
-    extensions = setify(extensions)
-    extensions = {e.lower() for e in extensions}
+    if extensions is not None:
+        extensions = setify(extensions)
+        extensions = {e.lower() for e in extensions}
     if recurse:
         res = []
         for i,(p,d,f) in enumerate(os.walk(path, followlinks=followlinks)): # returns (dirpath, dirnames, filenames)
@@ -943,9 +1006,14 @@ def get_files(path, extensions=None, recurse=True, folders=None, followlinks=Tru
         res = _get_files(path, f, extensions)
     return list(res)
 
-def get_image_files(path, recurse=True, folders=None):
+def get_image_files(path, recurse=True, folders=None, map_fn=None, sort_key=None):
     "Get image files in `path` recursively, only in `folders`, if specified."
-    return get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
+    l = get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
+    if sort_key is not None:
+        l = sorted(l, key=sort_key)
+    if map_fn is not None:
+        return list_map(l, map_fn)
+    return l
 
 def path_name(x):
     return x.name
@@ -954,7 +1022,8 @@ def last_modified(x):
     return x.stat().st_ctime
 
 def list_map(l, m):
-    return [m(x) for x in l]
+    return list(pd.Series(l).apply(m))
+    # return [m(x) for x in l]
 
 def p_list(path):
     return list(Path(path).iterdir())
@@ -978,7 +1047,7 @@ def path_list(path, suffix=None, make_str=False, map_fn=noop):
         l = list_map(l, str)
     return l
 
-def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=noop, reverse=False, only_dirs=False):
+def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=None, reverse=False, only_dirs=False):
 
     if suffix is None:
         l = p_list(path)
@@ -992,7 +1061,8 @@ def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=noop, rever
         l = sorted(l, key=last_modified, reverse=True)
     else:
         l = sorted(l, key=key, reverse=reverse)
-    l = list_map(l, map_fn)
+    if map_fn is not None:
+        l = list_map(l, map_fn)
     if make_str:
         l = list_map(l, str)
     return l

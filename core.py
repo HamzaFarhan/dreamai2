@@ -77,6 +77,13 @@ class HeadModel(nn.Module):
             return self.linear(self.pool(x))  
         return self.linear(torch.cat([self.pool(x), meta], dim=1))
 
+class MultiHeadModel(nn.Module):
+    def __init__(self, head_list):
+        super().__init__()
+        self.head_list = head_list
+    def forward(self, x, meta=None):
+        return [h(x) for h in self.head_list]
+
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
                 bn_final=False, lin_first=False, y_range=None):
     "Model head that takes `nf` features, runs through `lin_ftrs`, and out `n_out` classes."
@@ -98,7 +105,13 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
 def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1, pretrained=True):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
-    head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes)
+    if is_iterable(num_classes):
+        heads = []
+        for nc in num_classes:
+            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc)) 
+        head = MultiHeadModel(nn.ModuleList(heads))
+    else:
+        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes)
     net = nn.Sequential(body, head)
     return net
 
@@ -239,46 +252,73 @@ def cnn_padding(w,o,k,s):
 class Classifier():
     def __init__(self, class_names):
         self.class_names = class_names
-        self.class_correct = defaultdict(int)
-        self.class_totals = defaultdict(int)
+        if is_list(class_names) and is_list(class_names[0]):
+            self.class_correct = []
+            self.class_totals = []
+            for _ in range(len(class_names)):
+                self.class_correct+=[defaultdict(int)]
+                self.class_totals+=[defaultdict(int)]
+        else:
+            self.class_correct = defaultdict(int)
+            self.class_totals = defaultdict(int)
 
     def update_accuracies(self, outputs, labels):
-        _, preds = torch.max(torch.exp(outputs), 1)
-        # _, preds = torch.max(outputs, 1)
-        correct = np.squeeze(preds.eq(labels.data.view_as(preds)))
-        for i in range(labels.shape[0]):
-            label = labels.data[i].item()
-            self.class_correct[label] += correct[i].item()
-            self.class_totals[label] += 1
 
-    def fai_update_multi_accuracies(self, preds, label):
-        correct = label*preds
-        class_idx = torch.nonzero(label)[0]
-        for idx in class_idx:
-            c = correct[idx].item()
-            idx = idx.item()
-            self.class_correct[idx] += c
-            self.class_totals[idx] += 1
+        def update_accuracies_(outputs, labels, class_correct, class_totals):
+            _, preds = torch.max(torch.exp(outputs), 1)
+            correct = np.squeeze(preds.eq(labels.data.view_as(preds)))
+            for i in range(labels.shape[0]):
+                label = labels.data[i].item()
+                class_correct[label] += correct[i].item()
+                class_totals[label] += 1
+
+        if is_list(outputs):
+            for i,(o,l) in enumerate(zip(outputs, labels)):
+                update_accuracies_(o, l, self.class_correct[i], self.class_totals[i])
+        else:
+            update_accuracies_(outputs, labels, self.class_correct, self.class_totals)
 
     def update_multi_accuracies(self, outputs, labels, thresh=0.5):
-        preds = torch.sigmoid(outputs) > thresh
-        correct = (labels==1)*(preds==1)
-        for i in range(labels.shape[0]):
-            label = torch.nonzero(labels.data[i]).squeeze(1)
-            for l in label:
-                c = correct[i][l].item()
-                l = l.item()
-                self.class_correct[l] += c
-                self.class_totals[l] += 1
+
+        def update_multi_accuracies_(outputs, labels):
+            preds = torch.sigmoid(outputs) > thresh
+            correct = (labels==1)*(preds==1)
+            for i in range(labels.shape[0]):
+                label = torch.nonzero(labels.data[i]).squeeze(1)
+                for l in label:
+                    c = correct[i][l].item()
+                    l = l.item()
+                    self.class_correct[l] += c
+                    self.class_totals[l] += 1
+
+        if is_list(outputs):
+            for i,(o,l) in enumerate(zip(outputs, labels)):
+                update_multi_accuracies_(o, l, self.class_correct[i], self.class_totals[i])
+        else:
+            update_multi_accuracies_(outputs, labels, self.class_correct, self.class_totals)
 
     def get_final_accuracies(self):
-        accuracy = (100*np.sum(list(self.class_correct.values()))/np.sum(list(self.class_totals.values())))
-        try:
-            class_accuracies = [(self.class_names[i],100.0*(self.class_correct[i]/self.class_totals[i])) 
-                                 for i in self.class_names.keys() if self.class_totals[i] > 0]
-        except:
-            class_accuracies = [(self.class_names[i],100.0*(self.class_correct[i]/self.class_totals[i])) 
-                                 for i in range(len(self.class_names)) if self.class_totals[i] > 0]
+
+        def get_final_accuracies_(class_correct, class_totals, class_names):
+            # print(class_correct, class_totals, class_names)
+            accuracy = (100*np.sum(list(class_correct.values()))/np.sum(list(class_totals.values())))
+            try:
+                class_accuracies = [(class_names[i],100.0*(class_correct[i]/class_totals[i])) 
+                                    for i in class_names.keys() if class_totals[i] > 0]
+            except:
+                class_accuracies = [(class_names[i],100.0*(class_correct[i]/class_totals[i])) 
+                                    for i in range(len(class_names)) if class_totals[i] > 0]
+            return accuracy, class_accuracies
+
+        if is_list(self.class_correct):
+            accuracy = []
+            class_accuracies = []
+            for class_correct, class_totals, class_names in zip(self.class_correct, self.class_totals, self.class_names):
+                a,ca = get_final_accuracies_(class_correct, class_totals, class_names)
+                accuracy.append(a)
+                class_accuracies.append(ca)
+        else:
+            accuracy, class_accuracies = get_final_accuracies_(self.class_correct, self.class_totals, self.class_names)
         return accuracy, class_accuracies
 
 class ConfusionMatrix():
@@ -333,7 +373,8 @@ class DaiModel(nn.Module):
         self.device = device
         self.criterion = crit
         self.pred_thresh = pred_thresh
-
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
         if checkpoint:
             self.load_checkpoint(checkpoint, load_opt=load_opt, load_crit=load_crit, load_misc=load_misc)
     
@@ -344,31 +385,40 @@ class DaiModel(nn.Module):
         return self.model[1](self.model[0](x), meta=meta)
     
     def compute_loss(self, outputs, labels, class_weights=None, extra_loss_func=None, **kwargs):
-        if extra_loss_func is not None:
-            r = getattr(self.criterion, 'reduction')
-            setattr(self.criterion, 'reduction', 'none')
-            loss = self.criterion(outputs, labels)
-            # print('ooooh')
-            setattr(self.criterion, 'reduction', r)
-            loss = extra_loss_func(loss)
-            # print('focal')
-            return loss
-        if class_weights is not None:
-            class_weights = class_weights.to(outputs.device)
-            if is_bce(self.criterion):
+
+        def compute_loss_(outputs, labels, class_weights=None):
+            if extra_loss_func is not None:
                 r = getattr(self.criterion, 'reduction')
                 setattr(self.criterion, 'reduction', 'none')
-                loss = (self.criterion(outputs, labels) * class_weights).mean()
-                setattr(self.criterion, 'reduction', r)
-                return loss
-            elif is_cross_entropy(self.criterion):
-                w = getattr(self.criterion, 'weight')
-                setattr(self.criterion, 'weight', class_weights)
                 loss = self.criterion(outputs, labels)
-                setattr(self.criterion, 'weight', w)
+                # print('ooooh')
+                setattr(self.criterion, 'reduction', r)
+                loss = extra_loss_func(loss)
+                # print('focal')
                 return loss
-
-        return self.criterion(outputs, labels)
+            if class_weights is not None:
+                class_weights = class_weights.to(outputs.device)
+                if is_bce(self.criterion):
+                    r = getattr(self.criterion, 'reduction')
+                    setattr(self.criterion, 'reduction', 'none')
+                    loss = (self.criterion(outputs, labels) * class_weights).mean()
+                    setattr(self.criterion, 'reduction', r)
+                    return loss
+                elif is_cross_entropy(self.criterion):
+                    w = getattr(self.criterion, 'weight')
+                    setattr(self.criterion, 'weight', class_weights)
+                    loss = self.criterion(outputs, labels)
+                    setattr(self.criterion, 'weight', w)
+                    return loss
+            return self.criterion(outputs, labels)
+        
+        if is_list(outputs):
+            loss = 0
+            for o,l in zip(outputs, labels):
+                loss += compute_loss_(o, l, class_weights=class_weights)
+        else:
+            loss = compute_loss_(outputs, labels, class_weights=class_weights)
+        return loss
     
     def process_batch(self, data_batch, device=None):
         if device is None:
@@ -379,7 +429,10 @@ class DaiModel(nn.Module):
         labels = None
         if 'label' in data_batch.keys():
             labels = data_batch['label']
-            labels = labels.to(device)
+            if is_list:
+                labels = [l.to(device) for l in labels]
+            else:
+                labels = labels.to(device)
         meta = None
         if 'meta' in data_batch.keys():
             meta = data_batch['meta'].to(device)

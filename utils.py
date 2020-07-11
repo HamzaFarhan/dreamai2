@@ -280,25 +280,56 @@ def folders_to_df(path, imgs_repeat=False):
     df = pd.DataFrame(dd, columns=['imgs', 'labels'])
     return df
 
+def locals_to_params(l, omit=[], expand=['kwargs']):
+    if 'kwargs' not in expand:
+        expand.append('kwargs')
+    l = copy.deepcopy(l)
+    if 'self' in l.keys():
+        del l['self']
+    if '__class__' in l.keys():
+        del l['__class__']
+    keys = dict_keys(l)
+    for k in keys:
+        if k in expand:
+            for k2 in l[k]:
+                if k2 not in l.keys():
+                    l[k2] = l[k][k2]
+            del l[k]
+        if k in omit:
+            del l[k]
+    return l
+
+def merg_dicts(d1,d2):
+    d = {}
+    for k in d1:
+        d[k] = d1[k]
+    for k in d2:
+        d[k] = d2[k]
+    return d
+
 def dict_values(d):
     return list(d.values())
 
-def swap_dict_key(d, x, y, strict=False):
+def dict_keys(d):
+    return list(d.keys())
+
+def swap_dict_key_letters(d, x, y, strict=False):
     if strict:
         return OrderedDict([(k.replace(x, y), v) if x == k else (k, v) for k, v in d.items()])    
     return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])
 
-def swap_state_dict_key_first(sd, x, y):
+def swap_state_dict_key_first_letter(sd, x, y):
     return OrderedDict([(y+k[1:], v) if k[0]==x else (k, v) for k, v in sd.items()])
 
+def change_key_name(d, k1, k2):
+    d[k2] = d[k1]
+    del d[k1]
+
 def remove_key_fn(d, fn):
-    keys = list(d.keys())
+    keys = dict_keys(d)
     for k in keys:
         if fn(k):
             del d[k]
-
-def del_key(d, k):
-    del d[k]
 
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
     model_sd = swap_dict_key(checkpoint['model'], swap_x, swap_y)
@@ -377,6 +408,9 @@ def get_norm(tfms):
         if is_norm(t):
             return t
     return False
+
+def is_module_list(x):
+    return isinstance(x, nn.ModuleList)
 
 def is_sequential(x):
     return isinstance(x, nn.Sequential)
@@ -976,6 +1010,16 @@ def show_landmarks(image, landmarks):
     plt.show()
 
 def chunkify(l, chunk_size):
+
+    if list_or_tuple(chunk_size):
+        l2 = []
+        l2.append(l[:chunk_size[0]])
+        for i in range(1, len(chunk_size)):
+            c1 = sum(chunk_size[:i])
+            c2 = chunk_size[i]+c1
+            l2.append(l[c1:c2])
+        return l2
+
     return [l[i:i+chunk_size] for i in range(0,len(l), chunk_size)]
 
 def setify(o): return o if isinstance(o,set) else set(list(o))

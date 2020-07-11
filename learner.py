@@ -73,8 +73,7 @@ class CheckpointCallback(Callback):
     def before_fit(self):
         self.not_imporoved = 0
 
-    def after_valid(self):
-
+    def get_curr_metric(self):
         if self.save_class is not None:
             class_acc = self.val_ret['class_accuracies']
             for ca in class_acc:
@@ -84,7 +83,11 @@ class CheckpointCallback(Callback):
                     break
         else:
             curr_metric = self.val_ret[self.save_metric]
+        return curr_metric
 
+    def after_valid(self):
+
+        curr_metric = self.get_curr_metric()
         if (self.save_every is not None) and ((self.curr_epoch+1) % self.save_every == 0): 
             checkpoint = self.model.checkpoint_dict()
             checkpoint[self.save_metric] = curr_metric

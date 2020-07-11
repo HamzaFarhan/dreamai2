@@ -6,241 +6,188 @@ class DaiDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3,
                  meta_idx=None, do_tta=False, tta=None, num_tta=3,  **kwargs):
         super(DaiDataset, self).__init__()
+        store_attr(self,'data,tfms,ss_tfms,meta_idx,do_tta,tta,num_tta,channels')
         self.tfms_list = []
         self.data_dir = str(data_dir)
-        self.data = data
-        self.tfms = tfms
-        self.ss_tfms = ss_tfms
-        self.meta_idx = meta_idx
-        self.do_tta = do_tta
-        self.tta = tta
-        self.num_tta = num_tta
         if self.tfms is not None:
             self.tfms_list.append(self.tfms)
         if self.ss_tfms is not None:
             self.tfms_list.append(self.ss_tfms)
-        # if tfms is not None:
-            # self.tfms = albu.Compose(tfms)
-        # else:
-            # self.tfms = tfms
-        self.channels = channels
         for k in kwargs:
             setattr(self, k, kwargs[k])
         
     def __len__(self):
         return len(self.data)
     
-    def __getitem__(self, index):
+    def get_name(self, index):
+        try:
+            img_name = self.data.iloc[index, 0]
+        except:
+            img_name = self.data[index, 0]
+        return img_name
+
+    def get_img_path(self, index):
         try:
             img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
         except:
             img_path = os.path.join(self.data_dir, self.data[index, 0])
+        return img_path
 
-        # img_path = str(img_path)
-        # if len(img_path.split()) > 1:
-            # img_path = img_path.split()[0]
-        # if not Path(img_path).exists():
-        #print(img_path)
+    def get_img(self, index):
+        img_path = self.get_img_path(index)
         try:
             if self.channels == 3:
                 img = rgb_read(img_path)
             else:    
                 img = c1_read(img_path)
+            return img
         except:
             print(img_path)
+    
+    def get_y(self, index, str_to_index=True):
         try:
             y = self.data.iloc[index, 1]
         except:
             y = self.data[index, 1]                    
+        if str_to_index:
+            if is_str(y) and hasattr(self, 'class_names'):
+                y = self.class_names.index(y)
+        return y
 
-        if is_str(y) and hasattr(self, 'class_names'):
-            y = self.class_names.index(y)
-        if self.do_tta:
-            if self.tta is None:
-                self.tta = [self.tfms] * self.num_tta
+    def get_tta(self, **kwargs):
+        img,y,name = kwargs['img'], kwargs['y'], kwargs['name']
+        if self.tta is None:
+            self.tta = [self.tfms] * self.num_tta
             # if self.tta is not None:
-            ret_tta = [{'x':apply_tfms(img.copy(),t), 'label':y, 'path':self.data.iloc[index, 0]} for t in self.tta]
-            return ret_tta
+        ret_tta = [{'x':apply_tfms(img.copy(),t), 'label':y, 'name':name} for t in self.tta]
+        return ret_tta
 
+    def get_x(self, to_tensor=False, **kwargs):
+        img = kwargs['img']
         if self.tfms is not None:
             x = apply_tfms(img.copy(), self.tfms)
-            # x = self.tfms(image=img)['image']
             if self.channels == 1:
                 x = x.unsqueeze(0)
+            if to_tensor:
+                x = tensor_to_img(x)
         else:
             x = img
-        
-        ret = {'x':x, 'label':y, 'path':self.data.iloc[index, 0]}
+        return x
+
+    def get_ss(self, to_tensor=False):
+
+        index2 = random.choice(range(len(self.data)))
+        try:
+            img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
+        except:
+            img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
+        # img_path2 = str(img_path2)
+        if self.channels == 3:
+            img2 = rgb_read(img_path2)
+        else:    
+            img2 = c1_read(img_path2)
+        x2 = apply_tfms(img2.copy(), self.ss_tfms)
+        if self.channels == 1:
+            x2 = x2.unsqueeze(0)
+        norm_t = get_norm(self.tfms)
+        if norm_t:
+            mean = norm_t.mean
+            std = norm_t.std
+        else:
+            std = None
+            mean = None
+        resize_t = list(self.tfms)[0]
+        h,w = resize_t.height, resize_t.width
+        img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
+        img2 = apply_tfms(img2, img2_tfms)
+        if self.channels == 1:
+            img2 = img2.unsqueeze(0)
+        if to_tensor:
+            x2 = tensor_to_img(x2)
+            img2 = tensor_to_img(img2)
+        return x2,img2
+
+    def get_meta(self, index):
+        if not list_or_tuple(self.meta_idx):
+            meta1,meta2 = self.meta_idx, self.meta_idx+1
+        else:
+            meta1,meta2 = self.meta_idx
+        try:
+            ret_meta = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+        except:
+            ret_meta = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+        return ret_meta
+
+    def get_ret(self, **kwargs):
+        l = locals_to_params(locals())
+        remove_key_fn(l, lambda x: x not in ['x', 'y', 'name'])
+        change_key_name(l, 'y', 'label')
+        return l
+
+    def __getitem__(self, index, to_tensor=False):
+        # name = self.get_name(index=index)
+        name = self.get_img_path(index=index)
+        img = self.get_img(index=index)
+        y = self.get_y(index=index)
+        if self.do_tta:
+            return self.get_tta(**locals_to_params(locals()))
+        x = self.get_x(**locals_to_params(locals()))
+        ret = self.get_ret(**locals_to_params(locals()))
 
         if self.ss_tfms is not None:
-            # if self.ss_data is not None:
-            #     try:
-            #         img_path = os.path.join(self.data_dir, self.ss_data.iloc[index, 0])
-            #     except:
-            #         img_path = os.path.join(self.data_dir, self.ss_data[index, 0])
-            #     if self.channels == 3:
-            #         img = rgb_read(img_path)
-            #     else:    
-            #         img = c1_read(img_path)
+            ret['x2'], ret['ss_img'] = self.get_ss(to_tensor=to_tensor)
 
-            # x2 = apply_tfms(img, self.ss_tfms)
-            # if self.channels == 1:
-            #     x2 = x2.unsqueeze(0)
-            index2 = random.choice(range(len(self.data)))
-            try:
-                img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
-            except:
-                img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
-            # img_path2 = str(img_path2)
-            if self.channels == 3:
-                img2 = rgb_read(img_path2)
-            else:    
-                img2 = c1_read(img_path2)
-            x2 = apply_tfms(img2.copy(), self.ss_tfms)
-            if self.channels == 1:
-                x2 = x2.unsqueeze(0)
+        if self.meta_idx is not None:
+            ret['meta'] = self.get_meta(index=index)
+            
+        return ret
+
+    def denorm_data(self, data):
+        if self.tfms is not None:
+            to_denorm = ['x']
+            if self.ss_tfms:
+                to_denorm.append('x2')
+                to_denorm.append('ss_img')
             norm_t = get_norm(self.tfms)
             if norm_t:
                 mean = norm_t.mean
                 std = norm_t.std
-            else:
-                std = None
-                mean = None
-            resize_t = list(self.tfms)[0]
-            h,w = resize_t.height, resize_t.width
-            img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
-            img2 = apply_tfms(img2, img2_tfms)
-            if self.channels == 1:
-                img2 = img2.unsqueeze(0)
-            
-            ret['ss_img'] = img2
-            ret['x2'] = x2
-            # ret = {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
-        # else:
-            # img2 = x
-            # x2 = x
-        if self.meta_idx is not None:
-            if not list_or_tuple(self.meta_idx):
-                meta1,meta2 = self.meta_idx, self.meta_idx+1
-            else:
-                meta1,meta2 = self.meta_idx
-            try:
-                ret['meta'] = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
-            except:
-                ret['meta'] = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+                for k in to_denorm:
+                    data[k] = denorm_img(data[k], mean, std)
 
-        return ret
-        # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
-        # return x, y, img2, x2, self.data.iloc[index, 0]
+    def show_data(self, data):
+        x,name,label = data['x'], data['name'], data['show_label']
+        print(f'Name:{name}')
+        if self.tfms is None:
+            aug = ''
+        else: aug = ' Augmented'
+        plt_show(x, title=f'Normal{aug}: {label}')
+        if self.ss_tfms is not None:
+            img2,x2 = data['ss_img'], data['x2']
+            plt_show(img2, title=f'SS Image: {label}')
+            plt_show(x2, title=f'SS Augmented: {label}')
 
-    # def denorm_x(self, x):
-
-
-    def get_at_index(self, index, denorm=True, show=True):
-
-        data = self.__getitem__(index)
-        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
-        if self.channels == 3:
-            img = rgb_read(img_path)
-        else:    
-            img = c1_read(img_path)
-        
-        y = self.data.iloc[index, 1]
+    def get_show_label(self, y, index):
         if not is_str(y) and (is_iterable(y) or is_tensor(y)):
             label = self.data.iloc[index, 2]
         else:
             label = y
-        if self.tfms is not None:
-            x = apply_tfms(img.copy(), self.tfms)
-            # x = (self.tfms(image=img)['image'])
-            if self.channels == 1:
-                x = x.unsqueeze(0)
-            x = tensor_to_img(x)
-            if denorm:
-                norm_t = get_norm(self.tfms)
-                if norm_t:
-                    mean = norm_t.mean
-                    std = norm_t.std
-                    x = denorm_img(x, mean, std)
-        else:
-            x = img
-        p = self.data.iloc[index, 0]
+        return label
 
-        ret = {'x':x, 'label':y, 'path':p}
+    def get_at_index(self, index, denorm=True, show=True):
 
-        if self.ss_tfms is not None:
-            # if self.ss_data is not None:
-            #     try:
-            #         img_path = os.path.join(self.data_dir, self.ss_data.iloc[index, 0])
-            #     except:
-            #         img_path = os.path.join(self.data_dir, self.ss_data[index, 0])
-            #     if self.channels == 3:
-            #         img = rgb_read(img_path)
-            #     else:    
-            #         img = c1_read(img_path)
-            index2 = random.choice(range(len(self.data)))
-            # img_path2 = str(img_path2)
-            try:
-                img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
-            except:
-                img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
-            if self.channels == 3:
-                img2 = rgb_read(img_path2)
-            else:    
-                img2 = c1_read(img_path2)
-            x2 = apply_tfms(img2.copy(), self.ss_tfms)
-            if self.channels == 1:
-                x2 = x2.unsqueeze(0)
-            x2 = tensor_to_img(x2)
-            norm_t = get_norm(self.tfms)
-            if norm_t:
-                mean = norm_t.mean
-                std = norm_t.std
-            else:
-                std = None
-                mean = None
-            resize_t = list(self.tfms)[0]
-            h,w = resize_t.height, resize_t.width
-            img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
-            img2 = apply_tfms(img2, img2_tfms)
-            if self.channels == 1:
-                img2 = img2.unsqueeze(0)
-            img2 = tensor_to_img(img2)
-            if denorm:
-                # norm_t = get_norm(self.ss_tfms)
-                # if norm_t:
-                    # mean = norm_t.mean
-                    # std = norm_t.std
-                img2 = denorm_img(img2, mean, std)
-                x2 = denorm_img(x2, mean, std)
-
-            ret['ss_img'] = img2
-            ret['x2'] = x2
-        # else:
-            # x2 = x
-            # img2 = x
-                
+        data = self.__getitem__(index, to_tensor=True)
+        y = self.get_y(index=index, str_to_index=False)
+        show_label = self.get_show_label(y=y, index=index)
+        if denorm:
+            self.denorm_data(data=data)
+        data['label'] = y
+        data['show_label'] = show_label
+        ret = data
         if show:
-            print(f'path:{p}')
-            if self.tfms is None:
-                aug = ''
-            else: aug = ' Augmented'
-            plt_show(x, title=f'Normal{aug}: {label}')
-            if self.ss_tfms is not None:
-                plt_show(img2, title=f'SS Image: {label}')
-                plt_show(x2, title=f'SS Augmented: {label}')
+            self.show_data(data=data)
 
-        if self.meta_idx is not None:
-            if not list_or_tuple(self.meta_idx):
-                meta1,meta2 = self.meta_idx, self.meta_idx+1
-            else:
-                meta1,meta2 = self.meta_idx
-            try:
-                ret['meta'] = torch.cat([tensor(m) for m in self.data.iloc[index, meta1:meta2]])
-            except:
-                ret['meta'] = torch.cat([tensor([m]) for m in self.data.iloc[index, meta1:meta2]])
         return ret
-        # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
 def init_vis(dset, data_dir):
     original_set = DaiDataset(data=dset.data, data_dir=data_dir)

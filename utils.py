@@ -240,6 +240,28 @@ def shift_df_col(df, id1=-1, id2=1):
     df2 = df.copy()[[*cols[:id2], cols[id1], *cols[id2:id1], *cols[id1+1:]]]
     return df2
 
+def all_in_list(l1, l2):
+    return all(elem in l2  for elem in l1)
+
+def slice_df(df, cols):
+    df = df.copy()
+    if not is_iterable(cols):
+        cols = [cols]
+    if is_iterable(cols[0]):
+        dfs = []
+        for c in cols:
+            if not all_in_list(c, df.columns):
+                c = [df.columns[i] for i in c]
+            dfs.append(df[c])
+    else:
+        if not all_in_list(cols, df.columns):
+            cols = [df.columns[i] for i in cols]
+        dfs = [df[cols]]
+    df_cols = flatten_list([df_.columns.to_list() for df_ in dfs])
+    if df.columns[0] not in df_cols:
+        dfs.insert(0, df[df.columns[0]])
+    return pd.concat(dfs, axis=1)
+
 def dai_one_hot(labels, class_names):
     return [(np.in1d(list(class_names), l)*1.) for l in labels]
 
@@ -299,7 +321,7 @@ def locals_to_params(l, omit=[], expand=['kwargs']):
             del l[k]
     return l
 
-def merg_dicts(d1,d2):
+def merge_dicts(d1,d2):
     d = {}
     for k in d1:
         d[k] = d1[k]
@@ -332,7 +354,7 @@ def remove_key_fn(d, fn):
             del d[k]
 
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
-    model_sd = swap_dict_key(checkpoint['model'], swap_x, swap_y)
+    model_sd = swap_dict_key_letters(checkpoint['model'], swap_x, swap_y)
     if only_body:
         remove_key_fn(model_sd, lambda x: x.startswith('1.'))
     elif only_head:
@@ -409,8 +431,14 @@ def get_norm(tfms):
             return t
     return False
 
+def is_device(x):
+    return isinstance(x, torch.device)
+
 def is_module_list(x):
     return isinstance(x, nn.ModuleList)
+
+def is_subscriptable(x):
+    return hasattr(x, '__getitem__')
 
 def is_sequential(x):
     return isinstance(x, nn.Sequential)
@@ -471,13 +499,28 @@ def load_state_dict(model, sd, strict=True, eval=True):
     if eval:
         model.eval()
 
-def set_lr(opt, lr):
-    # opt.param_groups[0]['lr'] = lr
-    opt.param_groups[-1]['lr'] = lr
+def set_lr(opt, lr, idx=None):
+    if idx is None:
+        l = len(opt.param_groups) 
+        if l <= 10:
+            idx = [-1]
+        else:
+            idx = range(l)
+    elif not list_or_tuple(idx):
+        idx = [idx]
+    for i in idx:
+        opt.param_groups[i]['lr'] = lr
 
 def get_lr(opt):
     # return opt.param_groups[0]['lr']
     return opt.param_groups[-1]['lr']
+
+def num_batches(dl):
+    try:
+        n = len(dl)
+    except:
+        n = int(len(dl.dataset.dataset)/dl.batch_size)+1
+    return n
 
 def get_optim(optimizer_name,params,lr):
     if optimizer_name.lower() == 'adam':
@@ -505,25 +548,33 @@ def params(m):
     "Return all parameters of `m`"
     return [p for p in m.parameters()]
 
-def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
+def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
                  tensorfy=True, img_mean=None, img_std=None, extra=[], test_tfms=True):
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
         t = AT.ToTensor()
-    tfms1 = [resize(height=h, width=w), *extra, normalize, t]
-    tfms2 = [test_resize(height=h, width=w), normalize, t]
-    tfms1 = albu.Compose(tfms1)
-    tfms2 = albu.Compose(tfms2)
+
+    tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
+    tfms2 = [[test_resize(height=h, width=w), normalize, t]]
+    if bbox:
+        tfms1.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+        tfms2.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+    tfms1 = albu.Compose(*tfms1)
+    tfms2 = albu.Compose(*tfms2)
     if test_tfms:
         return tfms1, tfms2
     return tfms1
 
-def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
+def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
              tensorfy=True, img_mean=None, img_std=None, extra=[], color=True, test_tfms=True):
 
     color_tfms = [albu.HueSaturationValue(p=0.3)]
+    distortion = [albu.OneOf([albu.OpticalDistortion(p=0.3),
+                              albu.GridDistortion(p=.1),
+                              albu.IAAPiecewiseAffine(p=0.3),],
+                              p=0.2)]
     extra += [
         albu.RandomRotate90(),
         albu.Flip(),
@@ -540,17 +591,14 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
         ], p=0.2),
         albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2),
         albu.OneOf([
-            albu.OpticalDistortion(p=0.3),
-            albu.GridDistortion(p=.1),
-            albu.IAAPiecewiseAffine(p=0.3),
-        ], p=0.2),
-        albu.OneOf([
             albu.CLAHE(clip_limit=2),
             albu.IAASharpen(),
             albu.IAAEmboss(),
             albu.RandomBrightnessContrast(),            
         ], p=0.3)
     ]
+    if not bbox:
+        extra += distortion
     if color:
         extra += color_tfms
     normalize,t  = None, None
@@ -558,10 +606,13 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
         t = AT.ToTensor()
-    tfms1 = [resize(height=h, width=w), *extra, normalize, t]
-    tfms2 = [test_resize(height=h, width=w), normalize, t]
-    tfms1 = albu.Compose(tfms1)
-    tfms2 = albu.Compose(tfms2)
+    tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
+    tfms2 = [[test_resize(height=h, width=w), normalize, t]]
+    if bbox:
+        tfms1.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+        tfms2.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+    tfms1 = albu.Compose(*tfms1)
+    tfms2 = albu.Compose(*tfms2)
     if test_tfms:
         return tfms1, tfms2
     return tfms1
@@ -733,7 +784,10 @@ def flatten_tensor(x):
     return x.view(x.shape[0],-1)
 
 def flatten_list(l):
-    return sum(l, [])
+    try:
+        return sum(l, [])
+    except:
+        return sum(l, ())
 
 def rmse(inputs,targets):
     return torch.sqrt(torch.mean((inputs - targets) ** 2))
@@ -981,8 +1035,8 @@ def solid_color_img(shape=(300,300,3), color='black'):
 
 def color_to_rgb(color):
     if type(color) == str:
-        return np.array(colors.to_rgb(color)).astype(int)*255
-    return color
+        return list_map(np.ceil(colors.to_rgb(color)).astype(int)*255, int)
+    return list_map(color, int)
 
 def get_font(font):
     fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if ((font.lower() in f.name.lower()) and not ('italic' in f.name.lower()))]

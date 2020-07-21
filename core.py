@@ -1,6 +1,7 @@
 from .utils import *
 from .plot_eval import *
 from .dai_imports import *
+from detectron2.utils.events import EventStorage
 
 def efficientnet_b0(num_channels=10, in_channels=3, **kwargs):
     return EfficientNet.from_pretrained('efficientnet-b0',
@@ -82,7 +83,7 @@ class MultiHeadModel(nn.Module):
         super().__init__()
         self.head_list = head_list
     def forward(self, x, meta=None):
-        return [h(x) for h in self.head_list]
+        return [h(x, meta) for h in self.head_list]
 
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
                 bn_final=False, lin_first=False, y_range=None):
@@ -126,6 +127,13 @@ def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1, pr
 
 def model_splitter(model, cut_percentage=0.2, only_body=False):
     
+    if not is_sequential(model):
+        p = params(model)
+        cut = int(len(p)*(1-cut_percentage))
+        ret1 = p[:cut]
+        ret2 = p[cut:]
+        return ret1,ret2
+
     if not only_body:
         ret1, ret2 = params(model[0]), params(model[1])            
         p = params(model[0][0])
@@ -806,3 +814,52 @@ class MatchingModel(DaiModel):
             return actv(outputs)
         return outputs
 
+class DaiObjModel(DaiModel):
+    def __init__(self, model, opt=None, device=None, checkpoint=None,
+                 load_opt=False, load_misc=False, **kwargs):
+        super().__init__(**locals_to_params(locals()))
+    
+    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
+        with EventStorage(0) as storage:
+            if device is None:
+                device = self.device
+
+            loss_dict = self.model(data_batch)
+            loss = sum(loss_dict.values())
+            if backward_step:
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+            del data_batch
+        return loss.item(), None
+    
+    def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
+        # return self.batch_to_loss(data_batch, backward_step=False)
+        outputs = self.model(data_batch)
+        del data_batch
+        return None, outputs
+
+    def predict(self, x, actv=None, device=None):
+
+        if device is None:
+            device = self.device
+    
+        self.eval()
+        self.model.eval()
+        self.model = self.model.to(device)
+        with torch.no_grad():
+            # print(x.shape)
+            if is_dict(x):
+                outputs,_ = self.process_batch(x, device=device)
+            else:
+                if is_tensor(x):
+                    if x.dim() == 3:
+                        x.unsqueeze_(0)
+                elif is_array(x):
+                    x = to_tensor(x).unsqueeze(0)
+                    # print(x)
+                x = x.to(device)
+                outputs = self.forward(x)
+        if actv is not None:
+            return actv(outputs)
+        return outputs

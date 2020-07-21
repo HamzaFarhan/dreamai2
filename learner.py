@@ -1,5 +1,5 @@
+from .obj import *
 from .core import *
-from .data import *
 
 class GetAttr:
     "Inherit from this to have all attr accesses in `self._xtra` passed down to `self.default`"
@@ -180,11 +180,13 @@ class BasicCallback(Callback):
             self.learner.classifier = Classifier(self.dls.class_names)
     
     def after_val_batch(self):
-        self.learner.val_running_loss += self.val_batch_loss
+        if self.val_batch_loss is not None:
+            self.learner.val_running_loss += self.val_batch_loss
     
     def after_val_epoch(self):
         self.learner.val_ret = {}
-        self.learner.val_ret['loss'] = self.val_running_loss/self.num_batches
+        if self.val_batch_loss is not None:
+            self.learner.val_ret['loss'] = self.val_running_loss/self.num_batches
         if 'accuracy' in self.learn_metric:
             self.learner.val_ret[self.learn_metric],\
             self.learner.val_ret['class_accuracies'] = self.classifier.get_final_accuracies()
@@ -215,6 +217,18 @@ class BasicCallback(Callback):
             c = np.array(self.dls.class_names)[bools]
             self.learner.pred_out = {'probs': p, 'bools':bools, 'pred': c}
         # if 'accuracy' in self.learn_metric:
+
+class ObjCallback(BasicCallback):    
+    def __init__(self, obj_output='obj_outputs'):
+        super().__init__()
+        self.obj_output = obj_output
+
+    def after_val_epoch(self):
+        self.learner.val_ret = {}
+        obj_results = do_obj_eval(self.dls, self.model.model, name='valid',
+                                  output_folder=self.obj_output)['bbox']
+        print(obj_results)
+        self.learner.val_ret = merge_dicts(self.val_ret, obj_results)
 
 def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):
 
@@ -284,6 +298,7 @@ class Ensemble():
     def evaluate(self, dl, model_weights=None, class_weights=None, class_names=None,
                  metric=None, pred_thresh=None, device=None, extra_loss_func=None):
 
+        n_batches = num_batches(dl)
         if device is None:
             device = self.device
 
@@ -347,9 +362,9 @@ class Ensemble():
         # print('Running_loss: {:.3f}'.format(running_loss))
         if metric == 'rmse':
             print('Total rmse: {:.3f}'.format(rmse_))
-            ret['final_rmse'] = rmse_/len(dl)
+            ret['final_rmse'] = rmse_/n_batches
 
-        ret['final_loss'] = running_loss/len(dl)
+        ret['final_loss'] = running_loss/n_batches
 
         if classifier is not None:
             ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
@@ -442,10 +457,13 @@ class Learner:
         store_attr(self, 'model,dls,model_splitter,cbs')
         self.learn_metric = metric
         for cb in cbs: cb.learner = self
-        self.model.normalize = dls.normalize
-        self.model.denorm = dls.denorm
-        self.model.img_mean = dls.img_mean
-        self.model.img_std = dls.img_std
+        try:
+            self.model.normalize = dls.normalize
+            self.model.denorm = dls.denorm
+            self.model.img_mean = dls.img_mean
+            self.model.img_std = dls.img_std
+        except:
+            pass
         self.extra_loss_func = None
         self.is_frozen = False
         assert len(cbs) > 0, print('Please pass some callbacks for training.')
@@ -557,8 +575,10 @@ class Learner:
     def train_epoch(self):
         self('before_train_epoch')
         dl = self.dls.train
-        self.num_batches = len(dl)
-        for self.batch_num, self.data_batch in enumerate(dl):
+        # self.num_batches = len(dl)
+        self.num_batches = num_batches(dl)
+        # for self.batch_num, self.data_batch in enumerate(dl):
+        for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
             self.train_batch()
             if self.print_progress:
                 self.print_train_progress()
@@ -567,9 +587,11 @@ class Learner:
     def val_epoch(self):
         self('before_val_epoch')
         dl = self.dls.valid
-        self.num_batches = len(dl)
+        # self.num_batches = len(dl)
+        self.num_batches = num_batches(dl)
         with torch.no_grad():
-            for self.batch_num, self.data_batch in enumerate(dl):
+            # for self.batch_num, self.data_batch in enumerate(dl):
+            for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
                 self.val_batch()
         self('after_val_epoch')
         if self.print_progress:
@@ -757,6 +779,7 @@ class Learner:
 
     def evaluate(self, dl, metric=None, pred_thresh=None, class_weights=None, do_tta=False, tta=None, num_tta=3, device=None):
 
+        n_batches = num_batches(dl)
         if device is None:
             device = self.model.device
     
@@ -840,9 +863,9 @@ class Learner:
         # print('Running_loss: {:.3f}'.format(running_loss))
         if metric == 'rmse':
             print('Total rmse: {:.3f}'.format(rmse_))
-            ret['final_rmse'] = rmse_/len(dl)
+            ret['final_rmse'] = rmse_/n_batches
 
-        ret['final_loss'] = running_loss/len(dl)
+        ret['final_loss'] = running_loss/n_batches
 
         if classifier is not None:
             ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
@@ -945,14 +968,14 @@ class Learner:
     def find_lr(self, dl=None, init_value=1e-8, final_value=10., beta=0.98, class_weights=None, plot=False):
 
         print('\nFinding the ideal learning rate.')
-
         model_state = copy.deepcopy(self.model.state_dict())
         optim_state = copy.deepcopy(self.model.optimizer.state_dict())
         self.model.train()
         optimizer = self.model.optimizer
         if dl is None:
             dl = self.dls.train
-        num = len(dl)-1
+        n_batches = num_batches(dl)
+        num = n_batches-1
         mult = (final_value / init_value) ** (1/num)
         lr = init_value
         set_lr(optimizer, lr)
@@ -1017,7 +1040,8 @@ class Learner:
         self.model.train()
         if dl is None:
             dl = self.dls.train
-        lr_lambda = lambda x: math.exp(x * math.log(end_lr/start_lr) / (lr_find_epochs*len(dl)))
+        n_batches = num_batches(dl)
+        lr_lambda = lambda x: math.exp(x * math.log(end_lr/start_lr) / (lr_find_epochs*n_batches))
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
         lr_find_loss = []
         lr_find_lr = []
@@ -1032,7 +1056,7 @@ class Learner:
             for data_batch in dl:
                 loss = self.model.batch_to_loss(data_batch, class_weights=class_weights, extra_loss_func=self.extra_loss_func)[0]
                 scheduler.step()
-                if iter >= min(3,(len(dl)//8)):
+                if iter >= min(3,(n_batches//8)):
                     if loss <= best_loss:
                         best_loss = loss
                         best_lr = last_lr*0.1

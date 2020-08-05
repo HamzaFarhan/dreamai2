@@ -10,6 +10,11 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 # DEFAULTS = {'image_extensions': image_extensions}
 
+imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
+
+def default_device():
+    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 def save_obj(path, obj):
     with open(path, 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
@@ -17,6 +22,16 @@ def save_obj(path, obj):
 def load_obj(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
+
+def np_to_parquet(arr, file_name='test.parquet'):
+    arr = list(arr.copy())
+    pdf = pd.DataFrame({'data':arr})
+    # display(pdf)
+    pdf.to_parquet(file_name)
+    
+def parquet_to_np(file_name='test.parquet'):
+    pdf = pd.read_parquet(file_name)
+    return np.array(pdf['data'])
 
 def display_img_actual_size(im_data, title=''):
     dpi = 80
@@ -182,6 +197,27 @@ def smooth_labels(labels,eps=0.1):
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
 
+def add_extension_(x, data_path='', ext='.jpg', do_str=True):
+    if ext[0] != '.': ext = '.'+ext
+    x = Path(data_path)/(x+ext)
+    if do_str:
+        str(x)
+    return x
+
+def add_extension(l, data_path='', ext='.jpg', do_str=True):
+    fn = partial(add_extension_, data_path=data_path, ext=ext, do_str=do_str)
+    return list_map(l, fn)
+
+def df_more_than_count(df, label='label', count=1):
+    return df.copy().groupby(label).filter(lambda x : len(x)>count).reset_index(drop=True)
+
+def df_remove_not_exists(df, col='img'):
+    df2 = df.copy()
+    for i,img in enumerate(list(df2[col])):
+        if not Path(img).exists():
+            df2 = df2.drop(i)
+    return df2.reset_index(drop=True)
+
 def df_classes(df):
     return np.unique(flatten_list([str(x).split() for x in list(df.iloc[:,1])]))
 
@@ -195,6 +231,38 @@ def split_df(train_df, test_size=0.15, stratify_idx=1, seed=2):
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)
     return train_df,val_df  
+
+def df_row_to_cols(df, idx=0):
+    return df.copy().rename(columns=df.iloc[0]).drop(df.index[0]).dropna().reset_index(drop=True)
+
+def shift_df_col(df, id1=-1, id2=1):
+    cols = df.columns.to_list()
+    if id1 < 0:
+        id1 = len(cols)+id1
+    df2 = df.copy()[[*cols[:id2], cols[id1], *cols[id2:id1], *cols[id1+1:]]]
+    return df2
+
+def all_in_list(l1, l2):
+    return all(elem in l2  for elem in l1)
+
+def slice_df(df, cols):
+    df = df.copy()
+    if not is_iterable(cols):
+        cols = [cols]
+    if is_iterable(cols[0]):
+        dfs = []
+        for c in cols:
+            if not all_in_list(c, df.columns):
+                c = [df.columns[i] for i in c]
+            dfs.append(df[c])
+    else:
+        if not all_in_list(cols, df.columns):
+            cols = [df.columns[i] for i in cols]
+        dfs = [df[cols]]
+    df_cols = flatten_list([df_.columns.to_list() for df_ in dfs])
+    if df.columns[0] not in df_cols:
+        dfs.insert(0, df[df.columns[0]])
+    return pd.concat(dfs, axis=1)
 
 def dai_one_hot(labels, class_names):
     return [(np.in1d(list(class_names), l)*1.) for l in labels]
@@ -236,22 +304,62 @@ def folders_to_df(path, imgs_repeat=False):
     df = pd.DataFrame(dd, columns=['imgs', 'labels'])
     return df
 
-def swap_dict_key(d, x, y, strict=False):
+def locals_to_params(l, omit=[], expand=['kwargs']):
+    if 'kwargs' not in expand:
+        expand.append('kwargs')
+    l = copy.deepcopy(l)
+    if 'self' in l.keys():
+        del l['self']
+    if '__class__' in l.keys():
+        del l['__class__']
+    keys = dict_keys(l)
+    for k in keys:
+        if k in expand:
+            for k2 in l[k]:
+                if k2 not in l.keys():
+                    l[k2] = l[k][k2]
+            del l[k]
+        if k in omit:
+            del l[k]
+    return l
+
+def merge_dicts(d1,d2):
+    d = {}
+    for k in d1:
+        d[k] = d1[k]
+    for k in d2:
+        d[k] = d2[k]
+    return d
+
+def dict_values(d):
+    return list(d.values())
+
+def dict_keys(d):
+    return list(d.keys())
+
+def swap_dict_key_letters(d, x, y, strict=False):
     if strict:
         return OrderedDict([(k.replace(x, y), v) if x == k else (k, v) for k, v in d.items()])    
     return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])
 
-def swap_state_dict_key_first(sd, x, y):
+def swap_state_dict_key_first_letter(sd, x, y):
     return OrderedDict([(y+k[1:], v) if k[0]==x else (k, v) for k, v in sd.items()])
 
+def change_key_name(d, k1, k2):
+    d[k2] = d[k1]
+    del d[k1]
+
 def remove_key(d, fn):
-    keys = list(d.keys())
+    if is_str(fn):
+        t = copy.deepcopy(fn)
+        fn = lambda x: x==t
+    keys = dict_keys(d)
     for k in keys:
         if fn(k):
             del d[k]
 
-def checkpoint_to_model(checkpoint, only_body=False, only_head=False):
-    model_sd = swap_dict_key(checkpoint['model'], 'model.', '')
+def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
+    model_sd = swap_dict_key_letters(checkpoint['model'], swap_x, swap_y)
     if only_body:
         remove_key(model_sd, lambda x: x.startswith('1.'))
     elif only_head:
@@ -285,6 +393,9 @@ def is_tuple(x):
 def list_or_tuple(x):
     return (is_list(x) or is_tuple(x))
 
+def is_iterable(x):
+    return list_or_tuple(x) or is_array(x)
+
 def is_dict(x):
     return isinstance(x, dict)
 
@@ -293,6 +404,9 @@ def is_df(x):
 
 def is_str(x):
     return isinstance(x, str)
+
+def is_int(x):
+    return isinstance(x, int)    
 
 def is_array(x):
     return isinstance(x, np.ndarray)
@@ -324,6 +438,34 @@ def get_norm(tfms):
         if is_norm(t):
             return t
     return False
+
+def get_norm_id(tfms):
+    try:
+        tfms_list = list(tfms)
+    except:
+        tfms_list = list(tfms.transforms)
+    for i,t in enumerate(tfms_list):
+        if is_norm(t):
+            return t,i
+    return None, None
+
+def del_norm(tfms, idx=None):
+    if idx is None:
+        idx = get_norm_id(tfms)[1]
+    if idx is not None:
+        del tfms.transforms.transforms[idx]
+
+def is_device(x):
+    return isinstance(x, torch.device)
+
+def is_module_list(x):
+    return isinstance(x, nn.ModuleList)
+
+def is_subscriptable(x):
+    return hasattr(x, '__getitem__')
+
+def is_sequential(x):
+    return isinstance(x, nn.Sequential)
 
 def is_resize(x):
     return ('Resize' in type(x).__name__) or ('resize' in type(x).__name__)
@@ -381,13 +523,28 @@ def load_state_dict(model, sd, strict=True, eval=True):
     if eval:
         model.eval()
 
-def set_lr(opt, lr):
-    # opt.param_groups[0]['lr'] = lr
-    opt.param_groups[-1]['lr'] = lr
+def set_lr(opt, lr, idx=None):
+    if idx is None:
+        l = len(opt.param_groups) 
+        if l <= 10:
+            idx = [-1]
+        else:
+            idx = range(l)
+    elif not list_or_tuple(idx):
+        idx = [idx]
+    for i in idx:
+        opt.param_groups[i]['lr'] = lr
 
 def get_lr(opt):
     # return opt.param_groups[0]['lr']
     return opt.param_groups[-1]['lr']
+
+def num_batches(dl):
+    try:
+        n = len(dl)
+    except:
+        n = int(len(dl.dataset.dataset)/dl.batch_size)+1
+    return n
 
 def get_optim(optimizer_name,params,lr):
     if optimizer_name.lower() == 'adam':
@@ -415,23 +572,33 @@ def params(m):
     "Return all parameters of `m`"
     return [p for p in m.parameters()]
 
-def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
-                 tensorfy=True, img_mean=None, img_std=None, extra=[]):
+def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
+                 tensorfy=True, img_mean=None, img_std=None, extra=[], test_tfms=True):
     normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
         t = AT.ToTensor()
-    tfms1 = [resize(height=h, width=w), *extra, normalize, t]
-    tfms2 = [test_resize(height=h, width=w), normalize, t]
-    tfms1 = albu.Compose(tfms1)
-    tfms2 = albu.Compose(tfms2)
-    return tfms1, tfms2
 
-def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
-             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True):
+    tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
+    tfms2 = [[test_resize(height=h, width=w), normalize, t]]
+    if bbox:
+        tfms1.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+        tfms2.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+    tfms1 = albu.Compose(*tfms1)
+    tfms2 = albu.Compose(*tfms2)
+    if test_tfms:
+        return tfms1, tfms2
+    return tfms1
+
+def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
+             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True, test_tfms=True):
 
     color_tfms = [albu.HueSaturationValue(p=0.3)]
+    distortion = [albu.OneOf([albu.OpticalDistortion(p=0.3),
+                              albu.GridDistortion(p=.1),
+                              albu.IAAPiecewiseAffine(p=0.3),],
+                              p=0.2)]
     extra += [
         albu.RandomRotate90(),
         albu.Flip(),
@@ -448,17 +615,14 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
         ], p=0.2),
         albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2),
         albu.OneOf([
-            albu.OpticalDistortion(p=0.3),
-            albu.GridDistortion(p=.1),
-            albu.IAAPiecewiseAffine(p=0.3),
-        ], p=0.2),
-        albu.OneOf([
             albu.CLAHE(clip_limit=2),
             albu.IAASharpen(),
             albu.IAAEmboss(),
             albu.RandomBrightnessContrast(),            
         ], p=0.3)
     ]
+    if not bbox:
+        extra += distortion
     if color:
         extra += color_tfms
     normalize,t  = None, None
@@ -466,17 +630,24 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize,
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
         t = AT.ToTensor()
-    tfms1 = [resize(height=h, width=w), *extra, normalize, t]
-    tfms2 = [test_resize(height=h, width=w), normalize, t]
-    tfms1 = albu.Compose(tfms1)
-    tfms2 = albu.Compose(tfms2)
-    return tfms1, tfms2
+    tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
+    tfms2 = [[test_resize(height=h, width=w), normalize, t]]
+    if bbox:
+        tfms1.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+        tfms2.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
+    tfms1 = albu.Compose(*tfms1)
+    tfms2 = albu.Compose(*tfms2)
+    if test_tfms:
+        return tfms1, tfms2
+    return tfms1
 
-def jigsaw_tfms(tfms1, tfms2):
+def jigsaw_tfms(tfms1, tfms2=None, index=-2):
     tfms = copy.deepcopy(tfms1)
     # tfms.transforms.transforms.insert(0, albu.RandomGridShuffle(p=1.))
-    tfms.transforms.transforms.insert(-2, albu.RandomGridShuffle(p=1.))
-    return tfms, tfms2
+    tfms.transforms.transforms.insert(index, albu.RandomGridShuffle(p=1.))
+    if tfms2 is not None:
+        return tfms, tfms2
+    return tfms
 
 def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resize,
              tensorfy=True, img_mean=None, img_std=None, aug_n=4, aug_m=1):
@@ -637,7 +808,10 @@ def flatten_tensor(x):
     return x.view(x.shape[0],-1)
 
 def flatten_list(l):
-    return sum(l, [])
+    try:
+        return sum(l, [])
+    except:
+        return sum(l, ())
 
 def rmse(inputs,targets):
     return torch.sqrt(torch.mean((inputs - targets) ** 2))
@@ -791,12 +965,12 @@ def vid_to_frames(v, dest_folder='', name='frame%05d.jpg', fps=30):
     imgs = vid.write_images_sequence(str(vp/name), fps=fps)
     return imgs
 
-def extract_frames(v, fps=30):
-    if isinstance(v, str) or isinstance(v, Path):
+def extract_frames(v, t0=0, t1=None, fps=30):
+    if path_or_str(v):
         vid = editor.VideoFileClip(str(v))
     else:
         vid = v
-    return list(vid.iter_frames(fps))
+    return list(vid.subclip(t0,t1).iter_frames(fps))
 
 def vid_folders_to_frames(video_dict, video_path='videos', frame_path='frames',
                           frame_name='frame%05d.jpg', fps=30):
@@ -822,39 +996,65 @@ def add_text(img, text, x_factor=2, y_factor=2, font=cv2.FONT_HERSHEY_SIMPLEX, s
     return img
 
 def add_text_pil(img, text=['DreamAI'], x=None, y=None, font='verdana', font_size=None,
-                 color='white', stroke_width=0, stroke_fill='blue', align='center'):
+                 color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
 
-    if type(text) == str:
+    if is_str(text):
         text = [text]
     x_,y_ = x,y
-    if isinstance(img, str):
+    offset = 0
+    if is_str(img):
         img = Image.open(img)
     elif isinstance(img, Path):
         img = Image.open(str(img))
     elif isinstance(img, np.ndarray):
         img = Image.fromarray(img)
+    d = ImageDraw.Draw(img)
+    sizes = []
     for i,txt in enumerate(text):
         if font_size is None:
             font_size = img.size[1]
             s = img.size
-            while sum(np.array(s) < img.size) < 2:
+            while not ((np.array(s)*5) < img.size).all():
                 font_size -= int(img.size[1]/10)
                 fnt = ImageFont.truetype(get_font(font), font_size)
-                d = ImageDraw.Draw(img)
+                # d = ImageDraw.Draw(img)
                 s = fnt.getsize(txt)
         else:
             fnt = ImageFont.truetype(get_font(font), font_size)
-            d = ImageDraw.Draw(img)
+            # d = ImageDraw.Draw(img)
             s = fnt.getsize(txt)
-        # stroke_width = font_size//30
-        offset = i * int(s[1]*1.5)
+        sizes.append(s)
+    sizes = np.array(sizes)
+    if bg is not None:
+        bg_w = sizes[:,0].max()+20
+        bg_h = sizes[:,1].sum()*2
+        if x_ is None:
+            x = (img.size[0]//2) - (bg_w//2)
+        if y_ is None:
+            y = (img.size[1]//2) - (bg_h//2)
+        d.rectangle(((x,y),(x+bg_w, y+bg_h)), fill=bg)
+    
+    for i,data in enumerate(zip(text, sizes)):
+        txt,s = data
+        if i > 0:
+            offset += int(s[1]*1.5)
         if x_ is None:
             x = (img.size[0]//2) - (s[0]//2)
         if y_ is None:
-            y = (img.size[1]//2) - (s[1]//2) - (s[1]*(len(text)-1)) + offset
-        d.text((x, y), txt, font=fnt, fill=color, align=align, stroke_width=stroke_width, stroke_fill=stroke_fill)
+            y = (img.size[1]//2) - (s[1]//2) - (s[1]*(len(text)-1))
+        d.text((x, y+offset), txt, font=fnt, fill=color, align=align, stroke_width=stroke_width, stroke_fill=stroke_fill)
     img = np.array(img)
     return img
+
+def text_size(txt, font='dejavu serif', font_size=10):
+
+    fnt = ImageFont.truetype(get_font(font), font_size)
+    s = np.array((0,0))
+    if not list_or_tuple(txt):
+        txt = [txt]
+    for t in txt:
+        s += fnt.getsize(t)
+    return s
 
 def remove_from_list(l, r):
     for x in r:
@@ -885,14 +1085,15 @@ def solid_color_img(shape=(300,300,3), color='black'):
 
 def color_to_rgb(color):
     if type(color) == str:
-        return np.array(colors.to_rgb(color)).astype(int)*255
-    return color
+        return list_map(np.ceil(colors.to_rgb(color)).astype(int)*255, int)
+    return list_map(color, int)
 
 def get_font(font):
     fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if ((font.lower() in f.name.lower()) and not ('italic' in f.name.lower()))]
     if len(fonts) == 0:
-        print(f'"{font.capitalize()}" font not found.')
         fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if (('serif' in f.name.lower()) and not ('italic' in f.name.lower()))]
+        print(f'"{font.capitalize()}" font not found. Using "{Path(fonts[0]).stem.capitalize()}"')
+
     return fonts[0]
 
 def expand_rect(left,top,right,bottom,H,W, margin = 15):
@@ -914,6 +1115,16 @@ def show_landmarks(image, landmarks):
     plt.show()
 
 def chunkify(l, chunk_size):
+
+    if list_or_tuple(chunk_size):
+        l2 = []
+        l2.append(l[:chunk_size[0]])
+        for i in range(1, len(chunk_size)):
+            c1 = sum(chunk_size[:i])
+            c2 = chunk_size[i]+c1
+            l2.append(l[c1:c2])
+        return l2
+
     return [l[i:i+chunk_size] for i in range(0,len(l), chunk_size)]
 
 def setify(o): return o if isinstance(o,set) else set(list(o))
@@ -929,8 +1140,9 @@ def get_files(path, extensions=None, recurse=True, folders=None, followlinks=Tru
     if folders is None:
         folders = list([])
     path = Path(path)
-    extensions = setify(extensions)
-    extensions = {e.lower() for e in extensions}
+    if extensions is not None:
+        extensions = setify(extensions)
+        extensions = {e.lower() for e in extensions}
     if recurse:
         res = []
         for i,(p,d,f) in enumerate(os.walk(path, followlinks=followlinks)): # returns (dirpath, dirnames, filenames)
@@ -943,9 +1155,14 @@ def get_files(path, extensions=None, recurse=True, folders=None, followlinks=Tru
         res = _get_files(path, f, extensions)
     return list(res)
 
-def get_image_files(path, recurse=True, folders=None):
+def get_image_files(path, recurse=True, folders=None, map_fn=None, sort_key=None):
     "Get image files in `path` recursively, only in `folders`, if specified."
-    return get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
+    l = get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
+    if sort_key is not None:
+        l = sorted(l, key=sort_key)
+    if map_fn is not None:
+        return list_map(l, map_fn)
+    return l
 
 def path_name(x):
     return x.name
@@ -954,7 +1171,8 @@ def last_modified(x):
     return x.stat().st_ctime
 
 def list_map(l, m):
-    return [m(x) for x in l]
+    return list(pd.Series(l).apply(m))
+    # return [m(x) for x in l]
 
 def p_list(path):
     return list(Path(path).iterdir())
@@ -978,7 +1196,8 @@ def path_list(path, suffix=None, make_str=False, map_fn=noop):
         l = list_map(l, str)
     return l
 
-def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=noop, reverse=False, only_dirs=False):
+def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=None,
+                 reverse=False, only_dirs=False, full_path=True):
 
     if suffix is None:
         l = p_list(path)
@@ -992,7 +1211,10 @@ def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=noop, rever
         l = sorted(l, key=last_modified, reverse=True)
     else:
         l = sorted(l, key=key, reverse=reverse)
-    l = list_map(l, map_fn)
+    if map_fn is not None:
+        l = list_map(l, map_fn)
+    if not full_path:
+        l = list_map(l, lambda x:x.name)
     if make_str:
         l = list_map(l, str)
     return l

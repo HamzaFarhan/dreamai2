@@ -1,29 +1,71 @@
 from .utils import *
+# from .obj import *
 from .plot_eval import *
-from .dai_imports import *
+from detectron2.utils.events import EventStorage
+
+def efficientnet_b0(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b0',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b2(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b2',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b4(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b4',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b5(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b5',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b6(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b6',
+           num_classes=num_channels, in_channels=in_channels)
+def efficientnet_b7(num_channels=10, in_channels=3, **kwargs):
+    return EfficientNet.from_pretrained('efficientnet-b7',
+           num_classes=num_channels, in_channels=in_channels)
 
 models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
                resnet50: {'cut': -2, 'conv_channels': 2048},
                resnet101: {'cut': -2, 'conv_channels': 2048},
                resnext50_32x4d: {'cut': -2, 'conv_channels': 2048},
                resnext101_32x8d: {'cut': -2, 'conv_channels': 2048},
-               densenet121: {'cut': -1, 'conv_channels': 1024}}
-
-imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
+               densenet121: {'cut': -1, 'conv_channels': 1024},
+               efficientnet_b0: {'cut': -5, 'conv_channels': 1280},
+               efficientnet_b2: {'cut': -5, 'conv_channels': 1408},
+               efficientnet_b4: {'cut': -5, 'conv_channels': 1792},
+               efficientnet_b5: {'cut': -5, 'conv_channels': 2048},
+               efficientnet_b6: {'cut': -5, 'conv_channels': 2304},
+               efficientnet_b7: {'cut': -5, 'conv_channels': 2560}}
 
 DEFAULTS = {'models_meta': models_meta, 'metrics': ['loss', 'accuracy', 'multi_accuracy'],
             'imagenet_stats': imagenet_stats, 'image_extensions': image_extensions}
 
+class BodyModel(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x):
+        if isinstance(self.model, EfficientNet):
+            return self.model.extract_features(x)
+        return self.model(x)
+
 def create_body(arch, pretrained=True, cut=None, num_extra=3):
     model = arch(pretrained=pretrained)
-    if cut is None:
-        ll = list(enumerate(model.children()))
-        cut = next(i for i,o in reversed(ll) if has_pool_type(o))
-    modules = list(model.children())[:cut]
-    channels = models_meta[arch]['conv_channels']
-    extra_convs = [conv_block(channels, channels)]*num_extra
-    modules += extra_convs
-    return nn.Sequential(*modules)
+    if isinstance(model, EfficientNet):
+        body_model = BodyModel(model)
+    else:
+        if cut is None:
+            ll = list(enumerate(model.children()))
+            cut = next(i for i,o in reversed(ll) if has_pool_type(o))
+        modules = list(model.children())[:cut]
+        body_model = BodyModel(nn.Sequential(*modules))
+    if num_extra > 0:
+        channels = models_meta[arch]['conv_channels']
+        extra_convs = [conv_block(channels, channels)]*num_extra
+        extra_model = nn.Sequential(*extra_convs)
+        body_model = nn.Sequential(body_model, extra_model)
+    else:
+        body_model = nn.Sequential(body_model)
+    return body_model
 
 class HeadModel(nn.Module):
     def __init__(self, pool, linear):
@@ -33,6 +75,13 @@ class HeadModel(nn.Module):
         if meta is None:
             return self.linear(self.pool(x))  
         return self.linear(torch.cat([self.pool(x), meta], dim=1))
+
+class MultiHeadModel(nn.Module):
+    def __init__(self, head_list):
+        super().__init__()
+        self.head_list = head_list
+    def forward(self, x, meta=None):
+        return [h(x, meta) for h in self.head_list]
 
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
                 bn_final=False, lin_first=False, y_range=None):
@@ -52,12 +101,58 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     layers = nn.Sequential(*layers)
     return HeadModel(pool=pool_layers, linear=layers)
 
-def create_model(arch, num_classes, num_extra=3, meta_len=0, pretrained=True):
+def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1, pretrained=True):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
-    head = create_head(nf=(meta['conv_channels']*2)+meta_len, n_out=num_classes)
+    if is_iterable(num_classes):
+        heads = []
+        for nc in num_classes:
+            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc)) 
+        head = MultiHeadModel(nn.ModuleList(heads))
+    else:
+        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes)
     net = nn.Sequential(body, head)
     return net
+
+# def model_splitter(model, extra_cut=3, only_body=False):
+#     if not only_body:
+#         if extra_cut != 0:
+#             return params(model[0][:-extra_cut]), params(model[0][-extra_cut:]) + params(model[1])
+#         return params(model[0]), params(model[1])
+#     if extra_cut == 0:
+#         extra_cut = len(params(model))//6
+#     return params(model[:-extra_cut]), params(model[-extra_cut:])
+
+def model_splitter(model, cut_percentage=0.2, only_body=False):
+    
+    if not is_sequential(model):
+        p = params(model)
+        cut = int(len(p)*(1-cut_percentage))
+        ret1 = p[:cut]
+        ret2 = p[cut:]
+        return ret1,ret2
+
+    if not only_body:
+        ret1, ret2 = params(model[0]), params(model[1])            
+        p = params(model[0][0])
+        cut = int(len(p)*(1-cut_percentage))
+        ret1 = p[:cut]
+        ret2 = p[cut:] + params(model[1])
+        if len(model[0]) > 1:
+            # print('yeesdsssss')
+            ret2 += params(model[0][1])
+        return ret1, ret2
+
+    if cut_percentage == 0.:
+        print("Must pass a cut percentage in the case of 'only_body'. Setting it to 0.2.")
+        cut_percentage = 0.2
+    p = params(model[0])
+    cut = int(len(p)*(1-cut_percentage))
+    ret1 = p[:cut]
+    ret2 = p[cut:]
+    if len(model) > 1:
+        ret2 += params(model[1])
+    return ret1,ret2
 
 class LinBnDrop(nn.Sequential):
     "Module grouping `BatchNorm1d`, `Dropout` and `Linear` layers"
@@ -163,46 +258,73 @@ def cnn_padding(w,o,k,s):
 class Classifier():
     def __init__(self, class_names):
         self.class_names = class_names
-        self.class_correct = defaultdict(int)
-        self.class_totals = defaultdict(int)
+        if is_list(class_names) and is_list(class_names[0]):
+            self.class_correct = []
+            self.class_totals = []
+            for _ in range(len(class_names)):
+                self.class_correct+=[defaultdict(int)]
+                self.class_totals+=[defaultdict(int)]
+        else:
+            self.class_correct = defaultdict(int)
+            self.class_totals = defaultdict(int)
 
     def update_accuracies(self, outputs, labels):
-        _, preds = torch.max(torch.exp(outputs), 1)
-        # _, preds = torch.max(outputs, 1)
-        correct = np.squeeze(preds.eq(labels.data.view_as(preds)))
-        for i in range(labels.shape[0]):
-            label = labels.data[i].item()
-            self.class_correct[label] += correct[i].item()
-            self.class_totals[label] += 1
 
-    def fai_update_multi_accuracies(self, preds, label):
-        correct = label*preds
-        class_idx = torch.nonzero(label)[0]
-        for idx in class_idx:
-            c = correct[idx].item()
-            idx = idx.item()
-            self.class_correct[idx] += c
-            self.class_totals[idx] += 1
+        def update_accuracies_(outputs, labels, class_correct, class_totals):
+            _, preds = torch.max(torch.exp(outputs), 1)
+            correct = np.squeeze(preds.eq(labels.data.view_as(preds)))
+            for i in range(labels.shape[0]):
+                label = labels.data[i].item()
+                class_correct[label] += correct[i].item()
+                class_totals[label] += 1
+
+        if is_list(outputs):
+            for i,(o,l) in enumerate(zip(outputs, labels)):
+                update_accuracies_(o, l, self.class_correct[i], self.class_totals[i])
+        else:
+            update_accuracies_(outputs, labels, self.class_correct, self.class_totals)
 
     def update_multi_accuracies(self, outputs, labels, thresh=0.5):
-        preds = torch.sigmoid(outputs) > thresh
-        correct = (labels==1)*(preds==1)
-        for i in range(labels.shape[0]):
-            label = torch.nonzero(labels.data[i]).squeeze(1)
-            for l in label:
-                c = correct[i][l].item()
-                l = l.item()
-                self.class_correct[l] += c
-                self.class_totals[l] += 1
+
+        def update_multi_accuracies_(outputs, labels):
+            preds = torch.sigmoid(outputs) > thresh
+            correct = (labels==1)*(preds==1)
+            for i in range(labels.shape[0]):
+                label = torch.nonzero(labels.data[i]).squeeze(1)
+                for l in label:
+                    c = correct[i][l].item()
+                    l = l.item()
+                    self.class_correct[l] += c
+                    self.class_totals[l] += 1
+
+        if is_list(outputs):
+            for i,(o,l) in enumerate(zip(outputs, labels)):
+                update_multi_accuracies_(o, l, self.class_correct[i], self.class_totals[i])
+        else:
+            update_multi_accuracies_(outputs, labels, self.class_correct, self.class_totals)
 
     def get_final_accuracies(self):
-        accuracy = (100*np.sum(list(self.class_correct.values()))/np.sum(list(self.class_totals.values())))
-        try:
-            class_accuracies = [(self.class_names[i],100.0*(self.class_correct[i]/self.class_totals[i])) 
-                                 for i in self.class_names.keys() if self.class_totals[i] > 0]
-        except:
-            class_accuracies = [(self.class_names[i],100.0*(self.class_correct[i]/self.class_totals[i])) 
-                                 for i in range(len(self.class_names)) if self.class_totals[i] > 0]
+
+        def get_final_accuracies_(class_correct, class_totals, class_names):
+            # print(class_correct, class_totals, class_names)
+            accuracy = (100*np.sum(list(class_correct.values()))/np.sum(list(class_totals.values())))
+            try:
+                class_accuracies = [(class_names[i],100.0*(class_correct[i]/class_totals[i])) 
+                                    for i in class_names.keys() if class_totals[i] > 0]
+            except:
+                class_accuracies = [(class_names[i],100.0*(class_correct[i]/class_totals[i])) 
+                                    for i in range(len(class_names)) if class_totals[i] > 0]
+            return accuracy, class_accuracies
+
+        if is_list(self.class_correct):
+            accuracy = []
+            class_accuracies = []
+            for class_correct, class_totals, class_names in zip(self.class_correct, self.class_totals, self.class_names):
+                a,ca = get_final_accuracies_(class_correct, class_totals, class_names)
+                accuracy.append(a)
+                class_accuracies.append(ca)
+        else:
+            accuracy, class_accuracies = get_final_accuracies_(self.class_correct, self.class_totals, self.class_names)
         return accuracy, class_accuracies
 
 class ConfusionMatrix():
@@ -248,7 +370,7 @@ class BasicModel(nn.Module):
 
 class DaiModel(nn.Module):
     def __init__(self, model, opt=None, crit=nn.BCEWithLogitsLoss(), pred_thresh=0.5,
-                 device=None, checkpoint=None, load_opt=False, load_crit=False, load_misc=False):
+                 device=None, checkpoint=None, load_opt=False, load_crit=False, load_misc=False, **kwargs):
         super().__init__()
         if device is None:
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -257,7 +379,8 @@ class DaiModel(nn.Module):
         self.device = device
         self.criterion = crit
         self.pred_thresh = pred_thresh
-
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
         if checkpoint:
             self.load_checkpoint(checkpoint, load_opt=load_opt, load_crit=load_crit, load_misc=load_misc)
     
@@ -268,31 +391,40 @@ class DaiModel(nn.Module):
         return self.model[1](self.model[0](x), meta=meta)
     
     def compute_loss(self, outputs, labels, class_weights=None, extra_loss_func=None, **kwargs):
-        if extra_loss_func is not None:
-            r = getattr(self.criterion, 'reduction')
-            setattr(self.criterion, 'reduction', 'none')
-            loss = self.criterion(outputs, labels)
-            # print('ooooh')
-            setattr(self.criterion, 'reduction', r)
-            loss = extra_loss_func(loss)
-            # print('focal')
-            return loss
-        if class_weights is not None:
-            class_weights = class_weights.to(outputs.device)
-            if is_bce(self.criterion):
+
+        def compute_loss_(outputs, labels, class_weights=None):
+            if extra_loss_func is not None:
                 r = getattr(self.criterion, 'reduction')
                 setattr(self.criterion, 'reduction', 'none')
-                loss = (self.criterion(outputs, labels) * class_weights).mean()
-                setattr(self.criterion, 'reduction', r)
-                return loss
-            elif is_cross_entropy(self.criterion):
-                w = getattr(self.criterion, weight)
-                setattr(self.criterion, 'weight', class_weights)
                 loss = self.criterion(outputs, labels)
-                setattr(self.criterion, 'weight', w)
+                # print('ooooh')
+                setattr(self.criterion, 'reduction', r)
+                loss = extra_loss_func(loss)
+                # print('focal')
                 return loss
-
-        return self.criterion(outputs, labels)
+            if class_weights is not None:
+                class_weights = class_weights.to(outputs.device)
+                if is_bce(self.criterion):
+                    r = getattr(self.criterion, 'reduction')
+                    setattr(self.criterion, 'reduction', 'none')
+                    loss = (self.criterion(outputs, labels) * class_weights).mean()
+                    setattr(self.criterion, 'reduction', r)
+                    return loss
+                elif is_cross_entropy(self.criterion):
+                    w = getattr(self.criterion, 'weight')
+                    setattr(self.criterion, 'weight', class_weights)
+                    loss = self.criterion(outputs, labels)
+                    setattr(self.criterion, 'weight', w)
+                    return loss
+            return self.criterion(outputs, labels)
+        
+        if is_list(outputs):
+            loss = 0
+            for o,l in zip(outputs, labels):
+                loss += compute_loss_(o, l, class_weights=class_weights)
+        else:
+            loss = compute_loss_(outputs, labels, class_weights=class_weights)
+        return loss
     
     def process_batch(self, data_batch, device=None):
         if device is None:
@@ -303,7 +435,10 @@ class DaiModel(nn.Module):
         labels = None
         if 'label' in data_batch.keys():
             labels = data_batch['label']
-            labels = labels.to(device)
+            if is_list:
+                labels = [l.to(device) for l in labels]
+            else:
+                labels = labels.to(device)
         meta = None
         if 'meta' in data_batch.keys():
             meta = data_batch['meta'].to(device)
@@ -563,7 +698,7 @@ class SimilarityModel(DaiModel):
         
         return loss.item(), outputs
 
-    def predict(self, x, actv=None, device=None):
+    def predict(self, x, actv=None, device=None, **kwargs):
 
         if device is None:
             device = self.device
@@ -572,34 +707,37 @@ class SimilarityModel(DaiModel):
         self.model.eval()
         self.model = self.model.to(device)
         with torch.no_grad():
-            for i in range(2):
-                # print(x.shape)
-                if is_tensor(x[i]):
-                    if x[i].dim() == 3:
-                        x[i].unsqueeze_(0)
-                elif is_array(x[i]):
-                    x[i] = to_tensor(x[i]).unsqueeze(0)
-                    # print(x)
-                x[i] = x[i].to(device)
-            outputs = self.forward(*x)
+            if is_dict(x):
+                outputs = self.process_batch(x, device=device)
+            else:
+                for i in range(2):
+                    # print(x.shape)
+                    if is_tensor(x[i]):
+                        if x[i].dim() == 3:
+                            x[i].unsqueeze_(0)
+                    elif is_array(x[i]):
+                        x[i] = to_tensor(x[i]).unsqueeze(0)
+                        # print(x)
+                    x[i] = x[i].to(device)
+                outputs = self.forward(*x)
         if actv is not None:
             return actv(outputs)
         return outputs
+
+    def get_embeddings(self, x, device=None):
+        self.eval()
+        self.model.eval()
+        if device is None:
+            device = self.device
+        x = x['x'].to(device)
+        self.model = self.model.to(device)
+        return flatten_tensor(self.model(x))
 
 class MatchingModel(DaiModel):
     def __init__(self, model, opt, crit=nn.CrossEntropyLoss(), device=None, checkpoint=None, load_opt=False,
                  load_crit=False, load_misc=False):
         super().__init__(model=model, opt=opt, crit=crit, device=device, checkpoint=checkpoint, load_opt=load_opt,
                          load_crit=False, load_misc=False)
-        # self.model = model.to(device)
-        # self.optimizer = opt
-        # self.device = device
-        # self.criterion = crit
-        # self.pred_thresh = pred_thresh
-
-        # if checkpoint:
-        #     self.load_checkpoint(checkpoint)
-    
     def matcher(self, x1, x2):
         ftrs = torch.cat([(x1), (x2)], dim=1)
         return self.model[1](ftrs)
@@ -613,10 +751,8 @@ class MatchingModel(DaiModel):
     def forward(self, x1, x2):
         return self.matcher(*self.extractor(x1, x2))
     
-    def compute_loss(self, outputs, y):
-        if list_or_tuple(outputs):
-            return self.criterion(*outputs, y)
-        return self.criterion(outputs, y)
+    def compute_loss(self, outputs, labels):
+        return self.criterion(outputs, labels)
 
     def process_batch(self, data_batch, device=None):
         if device is None:
@@ -626,18 +762,15 @@ class MatchingModel(DaiModel):
         img1 = img1.to(device)
         img2 = img2.to(device)
         outputs = self.forward(img1, img2)
-        return outputs
+        labels = data_batch['label']
+        labels = labels.to(device)
+        return outputs, labels
 
     def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
         if device is None:
             device = self.device
-        # img1,img2 = data_batch['x'], data_batch['x2']
-        # img1 = img1.to(device)
-        # img2 = img2.to(device)
-        # outputs = self.forward(img1, img2)
-        outputs = self.process_batch(data_batch, device=device)
-        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(device)
-        loss = self.compute_loss(outputs, y)
+        outputs, labels = self.process_batch(data_batch, device=device)
+        loss = self.compute_loss(outputs, labels)
         if backward_step:
             self.optimizer.zero_grad()
             loss.backward()
@@ -647,17 +780,12 @@ class MatchingModel(DaiModel):
 
     def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
         ret = {}
-        # img1,img2 = data_batch['x'], data_batch['x2']
-        # img1 = img1.to(device)
-        # img2 = img2.to(device)
-        # outputs = self.forward(img1, img2)
-        outputs = self.process_batch(data_batch)
-        y = data_batch['same'][0] * torch.ones(outputs[0].shape[0]).to(self.device)
-        loss = self.compute_loss(outputs, y)
+        outputs, labels = self.process_batch(data_batch)
+        loss = self.compute_loss(outputs, labels)
         ret['loss'] = loss.item()
         ret['outputs'] = outputs
-        # if 'accuracy' in metric:
-            # self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
+        if 'accuracy' in metric:
+            self.update_accuracy(outputs, labels, kwargs['classifier'], metric)
         
         return loss.item(), outputs
 
@@ -684,3 +812,50 @@ class MatchingModel(DaiModel):
             return actv(outputs)
         return outputs
 
+class DaiObjModel(DaiModel):
+    def __init__(self, model, opt=None, device=None, checkpoint=None,
+                 load_opt=False, load_misc=False, **kwargs):
+        super().__init__(**locals_to_params(locals()))
+    
+    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
+        with EventStorage(0) as storage:
+            if device is None:
+                device = self.device
+
+            loss_dict = self.model(data_batch)
+            loss = sum(loss_dict.values())
+            if backward_step:
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+        return loss.item(), loss_dict
+    
+    def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
+        # return self.batch_to_loss(data_batch, backward_step=False)
+        outputs = self.model(data_batch)
+        return None, outputs
+
+    def predict(self, x, actv=None, device=None):
+
+        if device is None:
+            device = self.device
+    
+        self.eval()
+        self.model.eval()
+        self.model = self.model.to(device)
+        with torch.no_grad():
+            # print(x.shape)
+            if is_dict(x):
+                outputs,_ = self.process_batch(x, device=device)
+            else:
+                if is_tensor(x):
+                    if x.dim() == 3:
+                        x.unsqueeze_(0)
+                elif is_array(x):
+                    x = to_tensor(x).unsqueeze(0)
+                    # print(x)
+                x = x.to(device)
+                outputs = self.forward(x)
+        if actv is not None:
+            return actv(outputs)
+        return outputs

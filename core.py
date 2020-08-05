@@ -1,6 +1,6 @@
 from .utils import *
+# from .obj import *
 from .plot_eval import *
-from .dai_imports import *
 from detectron2.utils.events import EventStorage
 
 def efficientnet_b0(num_channels=10, in_channels=3, **kwargs):
@@ -34,8 +34,6 @@ models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
                efficientnet_b5: {'cut': -5, 'conv_channels': 2048},
                efficientnet_b6: {'cut': -5, 'conv_channels': 2304},
                efficientnet_b7: {'cut': -5, 'conv_channels': 2560}}
-
-imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
 DEFAULTS = {'models_meta': models_meta, 'metrics': ['loss', 'accuracy', 'multi_accuracy'],
             'imagenet_stats': imagenet_stats, 'image_extensions': image_extensions}
@@ -830,13 +828,11 @@ class DaiObjModel(DaiModel):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-            del data_batch
-        return loss.item(), None
+        return loss.item(), loss_dict
     
     def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
         # return self.batch_to_loss(data_batch, backward_step=False)
         outputs = self.model(data_batch)
-        del data_batch
         return None, outputs
 
     def predict(self, x, actv=None, device=None):

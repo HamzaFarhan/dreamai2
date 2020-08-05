@@ -1006,7 +1006,8 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
 
     if tta is not None and not list_or_tuple(tta):
         tta = [tta]*num_tta
-
+    if not is_iterable(tfms):
+        tfms = [tfms]
     def df_one_hot(df):
         df = df.copy()
         # labels = list(df.iloc[:,1].apply(lambda x: str(x).split()))
@@ -1299,34 +1300,46 @@ def get_matching_dls(df, val_df=None, test_df=None, data_dir='', dset=MatchingDa
     return dls
 
 class DataLoaders():
-    def __init__(self, train=None, valid=None, test=None):
+    def __init__(self, train=None, valid=None, test=None, remove_norm=False):
         store_attr(self, 'train,valid,test')
         if self.train:
             self.train_ds = self.train.dataset
             self.train_dl = partial(DataLoader, dataset=self.train_ds, batch_size=self.train.batch_size,
                                     shuffle=is_shuffle(self.train), num_workers=self.train.num_workers,
                                     pin_memory=self.train.pin_memory)
+
+            norm_t, norm_id = get_norm_id(self.train_ds.tfms)
+            if norm_id is not None:
+                self.normalize = partial(apply_tfms, tfms=norm_t)
+                self.denorm = partial(denorm_img, mean=norm_t.mean, std=norm_t.std)
+                self.img_mean = norm_t.mean
+                self.img_std = norm_t.std
+                if remove_norm:
+                    del_norm(self.train_ds.tfms, norm_id)
+            else:
+                self.normalize = noop
+                self.denorm = noop
+                self.img_mean, self.img_std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+
         if self.valid:
             self.valid_ds = self.valid.dataset
             self.valid_dl = partial(DataLoader, dataset=self.valid_ds, batch_size=self.valid.batch_size,
                                     shuffle=is_shuffle(self.valid), num_workers=self.valid.num_workers,
                                     pin_memory=self.valid.pin_memory)
+            if remove_norm:
+                norm_t, norm_id = get_norm_id(self.valid_ds.tfms)
+                if norm_id is not None:
+                    del_norm(self.valid_ds.tfms, norm_id)
+
         if self.test:
             self.test_ds = self.test.dataset
             self.test_dl = partial(DataLoader, dataset=self.test_ds, batch_size=self.test.batch_size,
                                    shuffle=is_shuffle(self.test), num_workers=self.test.num_workers,
                                    pin_memory=self.test.pin_memory)
-
-        norm_t = get_norm(self.train_ds.tfms)
-        if norm_t:
-            self.normalize = partial(apply_tfms, tfms=norm_t)
-            self.denorm = partial(denorm_img, mean=norm_t.mean, std=norm_t.std)
-            self.img_mean = norm_t.mean
-            self.img_std = norm_t.std
-        else:
-            self.normalize = noop
-            self.denorm = noop
-            self.img_mean, self.img_std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+            if remove_norm:
+                norm_t, norm_id = get_norm_id(self.test_ds.tfms)
+                if norm_id is not None:
+                    del_norm(self.test_ds.tfms, norm_id)
 
         self.suggested_crit = nn.CrossEntropyLoss()
         self.suggested_metric = 'loss'
@@ -1393,8 +1406,8 @@ class DataLoaders():
     def __len__(self):
         return sum([(self.train!=None) + (self.valid!=None) + (self.test!=None)])
 
-def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True):
-    dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle,
+def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_fn=None):
+    dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle, collate_fn=collate_fn,
                       num_workers=num_workers, pin_memory=pin_memory) for dset in dsets]
     # for dl in dls:
         # dl.suggested_metric = 'loss'

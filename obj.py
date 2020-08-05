@@ -19,70 +19,170 @@ from detectron2.utils.events import (
     TensorboardXWriter,
 )
 
-def build_obj_opt(cfg, model, lr=0.001):
-    cfg.SOLVER.BASE_LR = lr
-    return build_optimizer(cfg, model)
-
-def create_dataset_dicts(df, data_dir='', class_names=['person'], channels=3):
+class DaiObjDataset(DaiDataset):
     
-    dataset_dicts = []
-    for i in range(len(df)):
+    def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3,
+                 meta_idx=None, do_tta=False, tta=None, num_tta=3,  **kwargs):
+        super().__init__(**locals_to_params(locals()))
+        
+    def __len__(self):
+        return len(self.data)
+    
+    def get_name(self, index):
+        try:
+            img_name = self.data.iloc[index, 0]
+        except:
+            img_name = self.data[index, 0]
+        return img_name
+
+    def get_img_path(self, index):
+        try:
+            img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
+        except:
+            img_path = os.path.join(self.data_dir, self.data[index, 0])
+        return img_path
+
+    def get_img(self, index):
+        img_path = self.get_img_path(index)
+        try:
+            if self.channels == 3:
+#                 img = rgb_read(img_path)
+                img = cv2.imread(img_path)
+            else:    
+                img = c1_read(img_path)
+            return img
+        except:
+            print(img_path)
+
+    def get_x(self, to_tensor=False, **kwargs):
+        img = kwargs['img']
+        bboxes = kwargs['bboxes']
+        cats = kwargs['cats']
+        x = self.tfms(image=img.copy(), bboxes=bboxes, category_ids=cats)
+        x['bboxes'] = list_map(x['bboxes'], list)
+        if self.channels == 1:
+            x['image'] = x['image'].unsqueeze(0)
+        if to_tensor:
+            x['image'] = tensor_to_img(x['image'])
+        return x
+    
+    def get_record(self, index, img):
+        
         record = {}
-        row = df.iloc[i]
-        img_name = row.image
-        img_path = str(Path(data_dir)/img_name)
-        if channels == 3:
-            img = rgb_read(img_path)
-        else:    
-            img = c1_read(img_path)
+        row = self.data.iloc[index]
+        name = self.get_img_path(index=index)
         h,w = img.shape[:2]
-        record["file_name"] = img_path
-        record["image_id"] = i
+        record["file_name"] = name
+        record["image_id"] = index
         record["height"] = h
         record["width"] = w
-        labels = row.label.split()
-        bboxes = row.bb
+        labels = row[2].split()
+        bboxes = row[1]
         if len(labels) != len(bboxes):
             labels = labels*len(bboxes)
+#         objs = {'bbox':[], 'bbox_mode':[], 'category_id':[]}
         objs = []
         for b_id,bb in enumerate(bboxes):
             xmin,ymin,xmax,ymax = bb
             obj = {
             "bbox": [xmin, ymin, xmax, ymax],
             "bbox_mode": BoxMode.XYXY_ABS,
-            "category_id": class_names.index(labels[b_id]),
-#             "iscrowd": 0
+            "category_id": self.class_names.index(labels[b_id]),
             }
             objs.append(obj)
 
         record["annotations"] = objs
-        dataset_dicts.append(record)
-    return dataset_dicts
-
-def obj_dl_mapper(dataset_dict, tfms=instant_tfms(bbox=True, test_tfms=False)):
+        return record
     
-    dataset_dict = copy.deepcopy(dataset_dict)
-    image = rgb_read(str(dataset_dict["file_name"]))
-    ann = copy.deepcopy(dataset_dict['annotations'])
-    bc = np.array([(a['bbox'], a['category_id']) for a in ann])
-    bboxes = bc[:,0].tolist()
-    cats = bc[:,1].tolist()
-    
-    aug = tfms(image=image, bboxes=bboxes, category_ids=cats)
-    aug['bboxes'] = list_map(aug['bboxes'], list)
-    dataset_dict['image'] = aug['image']
+    def __getitem__(self, index, to_tensor=False):
+        # name = self.get_name(index=index)
+        
+        name = self.get_img_path(index=index)
+        img = self.get_img(index=index)
+        
+        record = self.get_record(index, img)
+        ann = copy.deepcopy(record['annotations'])
+        bc = np.array([(a['bbox'], a['category_id']) for a in ann])
+        bboxes = bc[:,0].tolist()
+        cats = bc[:,1].tolist()
+        
+        x = self.get_x(**locals_to_params(locals()))
+        record['image'] = x['image']
 
-    # if(len(ann) != len(aug['bboxes'])):
-    #     print('ooooh')
-    #     print(len(ann),len(aug['bboxes']))
-    #     temp1 = bb_image(image, bboxes=bboxes, cats=['person']*len(bboxes))
-    #     temp2 = bb_image(tensor_to_img(aug['image']), bboxes=aug['bboxes'], cats=['person']*len(aug['bboxes']))
-    #     plt_show(temp1)
-    #     plt_show(temp2)
-    for i in range(len(ann)):
-        ann[i]['bbox'] = aug['bboxes'][i]
-    dataset_dict['instances'] = detection_utils.annotations_to_instances(ann, image.shape[:2])
-    return dataset_dict
+        for i in range(len(ann)):
+            ann[i]['bbox'] = x['bboxes'][i]
+            
+#         remove_key(record, 'annotations')
+#         record['instances'] = np.array(ann)
+        record['instances'] = detection_utils.annotations_to_instances(ann, img.shape[:2])
+#         record['instances'] = 'lala'
+            
+        return record
+
+    def show_data(self, data):
+        x,name,label = data['image'], data['name'], data['show_label']
+        print(f'Name:{name}')
+        if self.tfms is None:
+            aug = ''
+        else: aug = ' Augmented'
+        plt_show(x, title=f'Normal{aug}: {label}')
+        if self.ss_tfms is not None:
+            img2,x2 = data['ss_img'], data['x2']
+            plt_show(img2, title=f'SS Image: {label}')
+            plt_show(x2, title=f'SS Augmented: {label}')
+
+    def get_show_label(self, y, index):
+        if not is_str(y) and (is_iterable(y) or is_tensor(y)):
+            label = self.data.iloc[index, 2]
+        else:
+            label = y
+        return label
+
+    def get_at_index(self, index, denorm=True, show=True):
+
+        data = self.__getitem__(index, to_tensor=True)
+        y = self.get_y(index=index, str_to_index=False)
+        show_label = self.get_show_label(y=y, index=index)
+        if denorm:
+            self.denorm_data(data=data)
+        data['label'] = y
+        data['show_label'] = show_label
+        ret = data
+        if show:
+            self.show_data(data=data)
+
+        return ret
+
+def build_obj_opt(cfg, model, lr=0.001):
+    cfg.SOLVER.BASE_LR = lr
+    return build_optimizer(cfg, model)
+
+def dai_obj_model(num_classes=2, img_mean=imagenet_stats[0].tolist(), bb_ber_img=50,
+                  img_std=imagenet_stats[1].tolist(), score_thresh=0.4, device=None):
+    if device is None:
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    else:
+        device = str(device)
+    cfg = get_cfg()
+    cfg.merge_from_file(
+      model_zoo.get_config_file(
+        "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"
+      )
+    )
+    # cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+      "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"
+    )
+#     cfg.INPUT.FORMAT = 'RGB'
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 16
+    cfg.MODEL.DEVICE = device
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
+    cfg.MODEL.PIXEL_MEAN = img_mean
+    cfg.MODEL.PIXEL_STD = img_std
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = score_thresh
+    cfg.TEST.DETECTIONS_PER_IMAGE = bb_ber_img
+    net = build_obj_model(cfg)
+    return net, cfg
 
 class ObjDataLoaders():
     def __init__(self, train=None, valid=None, test=None):
@@ -108,24 +208,31 @@ def faster_rcnn_cfg(device=None):
     cfg.MODEL.DEVICE = device
     return cfg
 
-def get_obj_dls(df, val_df=None, test_df=None, data_dir='', cfg=faster_rcnn_cfg(),
+def obj_collate(batch):
+    data = [b for b in batch]
+    return data
+
+def get_obj_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiObjDataset,
                 tfms=instant_tfms(224, 224, bbox=True), bs=64, shuffle=True,
-                class_names=None, num_workers=4, split=True,
-                val_size=0.2, test_size=0.15, img_mean=[0.4850, 0.4560, 0.4060],
-                img_std=[0.2290, 0.2240, 0.2250], data_name='obj_data', **kwargs):
+                class_names=None, num_workers=4, split=True, pin_memory=True,
+                val_size=0.2, test_size=0.15,
+                **kwargs):
     
-    cfg.DATALOADER.NUM_WORKERS = num_workers
-    cfg.MODEL.PIXEL_MEAN = img_mean
-    cfg.MODEL.PIXEL_STD = img_std
-    cfg.SOLVER.IMS_PER_BATCH = bs
+    if not is_iterable(tfms):
+        tfms = [tfms]
+    
+#     img_mean = None
+#     img_std= None
+#     for t in tfms:
+#         norm, norm_id = get_norm_id(t)
+#         if i is not None:
+#             del_norm(t, i)
+#             img_mean, img_std = norm.mean, norm.std
     
     labels = list(df.iloc[:,2].apply(lambda x: str(x).split()))
     if class_names is None:
         class_names = np.unique(flatten_list(labels))
     class_names = list_map(class_names, str)
-    
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(class_names)
-
     stratify_idx = 2
     dfs = [df]
     transforms_ = [tfms[0]]
@@ -150,36 +257,18 @@ def get_obj_dls(df, val_df=None, test_df=None, data_dir='', cfg=faster_rcnn_cfg(
         if test_df is not None:
             dfs+=[test_df]
             transforms_ = [tfms[0], tfms[1], tfms[1]]
-            
-    dset_dicts = [partial(create_dataset_dicts, df=df_, class_names=class_names) for df_ in dfs]
-    meta_datas = {}
-    for d,dset_d in zip(['train', 'valid', 'test'], dset_dicts):
-        dname = f'{data_name}_{d}'
-        try:
-            DatasetCatalog.register(dname, dset_d)
-            MetadataCatalog.get(dname).set(thing_classes=class_names)
-            meta_datas[d] = MetadataCatalog.get(dname)
-            setattr(cfg.DATASETS, d.upper(), (dname,))
-        except:
-            DatasetCatalog.clear()
-            DatasetCatalog.register(dname, dset_d)
-            MetadataCatalog.get(dname).set(thing_classes=class_names)
-            meta_datas[d] = MetadataCatalog.get(dname)
-            setattr(cfg.DATASETS, d.upper(), (dname,))
-        
-#     train_metadata = MetadataCatalog.get("obj_data_train")
-    mapper = partial(obj_dl_mapper, tfms=transforms_[0])
-    dls = [build_detection_train_loader(cfg, mapper)]
+    
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_,**kwargs,
+                  class_names=class_names,) for df,tfms_ in zip(dfs, transforms_)]
+    dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers,
+                  pin_memory=pin_memory, collate_fn=obj_collate)
     if split:
-        mapper = partial(obj_dl_mapper, tfms=transforms_[1])
-        dls += [build_detection_test_loader(cfg, f'{data_name}_{d}', mapper) for _,d in zip(dset_dicts[1:],
-                                                                                      ['valid', 'test'])]
-    dls = ObjDataLoaders(*dls)
-    dls.meta_datas = meta_datas
+        dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers,
+                       pin_memory=pin_memory, collate_fn=obj_collate)
+    dls = DataLoaders(*dls, remove_norm=True)
     dls.class_names = class_names
     dls.num_classes = len(class_names)
-    dls.suggested_metric = 'AP'
-    dls.cfg = cfg
+    dls.suggested_metric = 'MAP'
     return dls
 
 def do_obj_eval(dls, model, name='valid', output_folder='obj_outputs'):
@@ -244,9 +333,9 @@ def bb_image(image, bboxes, cats, color='red'):
         img = visualize_bbox(img, bbox, class_name, color=color)
     return img
 
-def dl_bb_image(dl, index=0, class_names=['person']):
+def ds_bb_image(ds, index=0, class_names=['person']):
 
-    d = dl.dataset.dataset[index]
+    d = ds[index]
     img = rgb_read(d['file_name'])
     ann = d['annotations']
     bbs = [a['bbox'] for a in ann]
@@ -260,4 +349,260 @@ def dl_bb_image(dl, index=0, class_names=['person']):
     img2 = bb_image(img, bboxes=bbs, cats=cats, color='blue')
     return img1,img2
 
+def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels,
+                  true_difficulties=None, class_names=['person'], iou_thresh=0.5, device=None):
+    """
+    Calculate the Mean Average Precision (mAP) of detected objects.
 
+    See https://medium.com/@jonathan_hui/map-mean-average-precision-for-object-detection-45c121a31173 for an explanation
+
+    :param det_boxes: list of tensors, one tensor for each image containing detected objects' bounding boxes
+    :param det_labels: list of tensors, one tensor for each image containing detected objects' labels
+    :param det_scores: list of tensors, one tensor for each image containing detected objects' labels' scores
+    :param true_boxes: list of tensors, one tensor for each image containing actual objects' bounding boxes
+    :param true_labels: list of tensors, one tensor for each image containing actual objects' labels
+    :param true_difficulties: list of tensors, one tensor for each image containing actual objects' difficulty (0 or 1)
+    :return: list of average precisions for all classes, mean average precision (mAP)
+    """
+
+    if device is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    label_map = {k: v + 1 for v, k in enumerate(class_names)}
+    label_map['background'] = 0
+    rev_label_map = {v: k for k, v in label_map.items()}  # Inverse mapping
+
+    if true_difficulties is None:
+        true_difficulties = [tensor([0]*len(x)) for x in true_boxes]
+
+    assert len(det_boxes) == len(det_labels) == len(det_scores) == len(true_boxes) == len(
+           true_labels) == len(true_difficulties)
+    n_classes = len(label_map)
+
+    # Store all (true) objects in a single continuous tensor while keeping track of the image it is from
+    true_images = list()
+    for i in range(len(true_labels)):
+        true_images.extend([i] * true_labels[i].size(0))
+    true_images = torch.LongTensor(true_images).to(device)
+    true_boxes = torch.cat(true_boxes, dim=0)  # (n_objects, 4)
+    true_labels = torch.cat(true_labels, dim=0)  # (n_objects)
+    true_difficulties = torch.cat(true_difficulties, dim=0)  # (n_objects)
+
+    assert true_images.size(0) == true_boxes.size(0) == true_labels.size(0)
+
+    # Store all detections in a single continuous tensor while keeping track of the image it is from
+    det_images = list()
+    for i in range(len(det_labels)):
+        det_images.extend([i] * det_labels[i].size(0))
+    det_images = torch.LongTensor(det_images).to(device)  # (n_detections)
+    det_boxes = torch.cat(det_boxes, dim=0)  # (n_detections, 4)
+    det_labels = torch.cat(det_labels, dim=0)  # (n_detections)
+    det_scores = torch.cat(det_scores, dim=0)  # (n_detections)
+
+    assert det_images.size(0) == det_boxes.size(0) == det_labels.size(0) == det_scores.size(0)
+
+    # Calculate APs for each class (except background)
+    average_precisions = torch.zeros((n_classes - 1), dtype=torch.float)  # (n_classes - 1)
+    for c in range(1, n_classes):
+        # Extract only objects with this class
+        true_class_images = true_images[true_labels == c]  # (n_class_objects)
+        true_class_boxes = true_boxes[true_labels == c]  # (n_class_objects, 4)
+        true_class_difficulties = true_difficulties[true_labels == c]  # (n_class_objects)
+        n_easy_class_objects = (1 - true_class_difficulties).sum().item()  # ignore difficult objects
+
+        # Keep track of which true objects with this class have already been 'detected'
+        # So far, none
+        true_class_boxes_detected = torch.zeros((true_class_difficulties.size(0)), dtype=torch.uint8).to(
+            device)  # (n_class_objects)
+
+        # Extract only detections with this class
+        det_class_images = det_images[det_labels == c]  # (n_class_detections)
+        det_class_boxes = det_boxes[det_labels == c]  # (n_class_detections, 4)
+        det_class_scores = det_scores[det_labels == c]  # (n_class_detections)
+        n_class_detections = det_class_boxes.size(0)
+        if n_class_detections == 0:
+            continue
+
+        # Sort detections in decreasing order of confidence/scores
+        det_class_scores, sort_ind = torch.sort(det_class_scores, dim=0, descending=True)  # (n_class_detections)
+        det_class_images = det_class_images[sort_ind]  # (n_class_detections)
+        det_class_boxes = det_class_boxes[sort_ind]  # (n_class_detections, 4)
+
+        # In the order of decreasing scores, check if true or false positive
+        true_positives = torch.zeros((n_class_detections), dtype=torch.float).to(device)  # (n_class_detections)
+        false_positives = torch.zeros((n_class_detections), dtype=torch.float).to(device)  # (n_class_detections)
+        for d in range(n_class_detections):
+            this_detection_box = det_class_boxes[d].unsqueeze(0)  # (1, 4)
+            this_image = det_class_images[d]  # (), scalar
+
+            # Find objects in the same image with this class, their difficulties, and whether they have been detected before
+            object_boxes = true_class_boxes[true_class_images == this_image]  # (n_class_objects_in_img)
+            object_difficulties = true_class_difficulties[true_class_images == this_image]  # (n_class_objects_in_img)
+            # If no such object in this image, then the detection is a false positive
+            if object_boxes.size(0) == 0:
+                false_positives[d] = 1
+                continue
+
+            # Find maximum overlap of this detection with objects in this image of this class
+            overlaps = find_jaccard_overlap(this_detection_box.to(device),
+                                            object_boxes.to(device))  # (1, n_class_objects_in_img)
+            max_overlap, ind = torch.max(overlaps.squeeze(0), dim=0)  # (), () - scalars
+
+            # 'ind' is the index of the object in these image-level tensors 'object_boxes', 'object_difficulties'
+            # In the original class-level tensors 'true_class_boxes', etc., 'ind' corresponds to object with index...
+            original_ind = torch.LongTensor(range(true_class_boxes.size(0)))[true_class_images == this_image][ind]
+            # We need 'original_ind' to update 'true_class_boxes_detected'
+
+            # If the maximum overlap is greater than the threshold of iou_thresh, it's a match
+            if max_overlap.item() > iou_thresh:
+                # If the object it matched with is 'difficult', ignore it
+                if object_difficulties[ind] == 0:
+                    # If this object has already not been detected, it's a true positive
+                    if true_class_boxes_detected[original_ind] == 0:
+                        true_positives[d] = 1
+                        true_class_boxes_detected[original_ind] = 1  # this object has now been detected/accounted for
+                    # Otherwise, it's a false positive (since this object is already accounted for)
+                    else:
+                        false_positives[d] = 1
+            # Otherwise, the detection occurs in a different location than the actual object, and is a false positive
+            else:
+                false_positives[d] = 1
+
+        # Compute cumulative precision and recall at each detection in the order of decreasing scores
+        cumul_true_positives = torch.cumsum(true_positives, dim=0)  # (n_class_detections)
+        cumul_false_positives = torch.cumsum(false_positives, dim=0)  # (n_class_detections)
+        cumul_precision = cumul_true_positives / (
+                cumul_true_positives + cumul_false_positives + 1e-10)  # (n_class_detections)
+        cumul_recall = cumul_true_positives / n_easy_class_objects  # (n_class_detections)
+
+        # Find the mean of the maximum of the precisions corresponding to recalls above the threshold 't'
+        recall_thresholds = torch.arange(start=0, end=1.1, step=.1).tolist()  # (11)
+        precisions = torch.zeros((len(recall_thresholds)), dtype=torch.float).to(device)  # (11)
+        for i, t in enumerate(recall_thresholds):
+            recalls_above_t = cumul_recall >= t
+            if recalls_above_t.any():
+                precisions[i] = cumul_precision[recalls_above_t].max()
+            else:
+                precisions[i] = 0.
+        average_precisions[c - 1] = precisions.mean()  # c is in [1, n_classes - 1]
+
+    # Calculate Mean Average Precision (mAP)
+    mean_average_precision = average_precisions.mean().item()
+    # mean_average_precision = average_precisions.item()
+
+    # Keep class-wise average precisions in a dictionary
+    average_precisions = {rev_label_map[c + 1]: v for c, v in enumerate(average_precisions.tolist())}
+
+    return average_precisions, mean_average_precision
+
+
+def xy_to_cxcy(xy):
+    """
+    Convert bounding boxes from boundary coordinates (x_min, y_min, x_max, y_max) to center-size coordinates (c_x, c_y, w, h).
+
+    :param xy: bounding boxes in boundary coordinates, a tensor of size (n_boxes, 4)
+    :return: bounding boxes in center-size coordinates, a tensor of size (n_boxes, 4)
+    """
+    return torch.cat([(xy[:, 2:] + xy[:, :2]) / 2,  # c_x, c_y
+                      xy[:, 2:] - xy[:, :2]], 1)  # w, h
+
+
+def cxcy_to_xy(cxcy):
+    """
+    Convert bounding boxes from center-size coordinates (c_x, c_y, w, h) to boundary coordinates (x_min, y_min, x_max, y_max).
+
+    :param cxcy: bounding boxes in center-size coordinates, a tensor of size (n_boxes, 4)
+    :return: bounding boxes in boundary coordinates, a tensor of size (n_boxes, 4)
+    """
+    return torch.cat([cxcy[:, :2] - (cxcy[:, 2:] / 2),  # x_min, y_min
+                      cxcy[:, :2] + (cxcy[:, 2:] / 2)], 1)  # x_max, y_max
+
+
+def cxcy_to_gcxgcy(cxcy, priors_cxcy):
+    """
+    Encode bounding boxes (that are in center-size form) w.r.t. the corresponding prior boxes (that are in center-size form).
+
+    For the center coordinates, find the offset with respect to the prior box, and scale by the size of the prior box.
+    For the size coordinates, scale by the size of the prior box, and convert to the log-space.
+
+    In the model, we are predicting bounding box coordinates in this encoded form.
+
+    :param cxcy: bounding boxes in center-size coordinates, a tensor of size (n_priors, 4)
+    :param priors_cxcy: prior boxes with respect to which the encoding must be performed, a tensor of size (n_priors, 4)
+    :return: encoded bounding boxes, a tensor of size (n_priors, 4)
+    """
+
+    # The 10 and 5 below are referred to as 'variances' in the original Caffe repo, completely empirical
+    # They are for some sort of numerical conditioning, for 'scaling the localization gradient'
+    # See https://github.com/weiliu89/caffe/issues/155
+    return torch.cat([(cxcy[:, :2] - priors_cxcy[:, :2]) / (priors_cxcy[:, 2:] / 10),  # g_c_x, g_c_y
+                      torch.log(cxcy[:, 2:] / priors_cxcy[:, 2:]) * 5], 1)  # g_w, g_h
+
+
+def gcxgcy_to_cxcy(gcxgcy, priors_cxcy):
+    """
+    Decode bounding box coordinates predicted by the model, since they are encoded in the form mentioned above.
+
+    They are decoded into center-size coordinates.
+
+    This is the inverse of the function above.
+
+    :param gcxgcy: encoded bounding boxes, i.e. output of the model, a tensor of size (n_priors, 4)
+    :param priors_cxcy: prior boxes with respect to which the encoding is defined, a tensor of size (n_priors, 4)
+    :return: decoded bounding boxes in center-size form, a tensor of size (n_priors, 4)
+    """
+
+    return torch.cat([gcxgcy[:, :2] * priors_cxcy[:, 2:] / 10 + priors_cxcy[:, :2],  # c_x, c_y
+                      torch.exp(gcxgcy[:, 2:] / 5) * priors_cxcy[:, 2:]], 1)  # w, h
+
+
+def find_intersection(set_1, set_2):
+    """
+    Find the intersection of every box combination between two sets of boxes that are in boundary coordinates.
+
+    :param set_1: set 1, a tensor of dimensions (n1, 4)
+    :param set_2: set 2, a tensor of dimensions (n2, 4)
+    :return: intersection of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
+    """
+
+    # PyTorch auto-broadcasts singleton dimensions
+    lower_bounds = torch.max(set_1[:, :2].unsqueeze(1), set_2[:, :2].unsqueeze(0))  # (n1, n2, 2)
+    upper_bounds = torch.min(set_1[:, 2:].unsqueeze(1), set_2[:, 2:].unsqueeze(0))  # (n1, n2, 2)
+    intersection_dims = torch.clamp(upper_bounds - lower_bounds, min=0)  # (n1, n2, 2)
+    return intersection_dims[:, :, 0] * intersection_dims[:, :, 1]  # (n1, n2)
+
+
+def find_jaccard_overlap(set_1, set_2):
+    """
+    Find the Jaccard Overlap (IoU) of every box combination between two sets of boxes that are in boundary coordinates.
+
+    :param set_1: set 1, a tensor of dimensions (n1, 4)
+    :param set_2: set 2, a tensor of dimensions (n2, 4)
+    :return: Jaccard Overlap of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
+    """
+
+    # Find intersections
+    intersection = find_intersection(set_1, set_2)  # (n1, n2)
+
+    # Find areas of each box in both sets
+    areas_set_1 = (set_1[:, 2] - set_1[:, 0]) * (set_1[:, 3] - set_1[:, 1])  # (n1)
+    areas_set_2 = (set_2[:, 2] - set_2[:, 0]) * (set_2[:, 3] - set_2[:, 1])  # (n2)
+
+    # Find the union
+    # PyTorch auto-broadcasts singleton dimensions
+    union = areas_set_1.unsqueeze(1) + areas_set_2.unsqueeze(0) - intersection  # (n1, n2)
+
+    return intersection / union  # (n1, n2)
+
+def get_obj_detection(det_batch):
+    det_batch = det_batch.copy()
+    det_boxes = [o['instances'].get_fields()['pred_boxes'].tensor for o in det_batch]
+    det_labels = [o['instances'].get_fields()['pred_classes']+1 for o in det_batch]
+    det_scores = [o['instances'].get_fields()['scores'] for o in det_batch]
+    return det_boxes, det_labels, det_scores
+
+def get_obj_true(true_batch):
+    true_batch = true_batch.copy()
+    true_boxes = [v['instances'].get_fields()['gt_boxes'].tensor for v in true_batch]
+    true_labels = [v['instances'].get_fields()['gt_classes']+1 for v in true_batch]
+    return true_boxes, true_labels

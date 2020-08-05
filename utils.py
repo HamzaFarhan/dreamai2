@@ -10,6 +10,8 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 # DEFAULTS = {'image_extensions': image_extensions}
 
+imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
+
 def default_device():
     return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -347,7 +349,10 @@ def change_key_name(d, k1, k2):
     d[k2] = d[k1]
     del d[k1]
 
-def remove_key_fn(d, fn):
+def remove_key(d, fn):
+    if is_str(fn):
+        t = copy.deepcopy(fn)
+        fn = lambda x: x==t
     keys = dict_keys(d)
     for k in keys:
         if fn(k):
@@ -356,9 +361,9 @@ def remove_key_fn(d, fn):
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
     model_sd = swap_dict_key_letters(checkpoint['model'], swap_x, swap_y)
     if only_body:
-        remove_key_fn(model_sd, lambda x: x.startswith('1.'))
+        remove_key(model_sd, lambda x: x.startswith('1.'))
     elif only_head:
-        remove_key_fn(model_sd, lambda x: x.startswith('0.'))
+        remove_key(model_sd, lambda x: x.startswith('0.'))
     return model_sd
 
 def split_params(model, n=3):
@@ -400,6 +405,9 @@ def is_df(x):
 def is_str(x):
     return isinstance(x, str)
 
+def is_int(x):
+    return isinstance(x, int)    
+
 def is_array(x):
     return isinstance(x, np.ndarray)
 
@@ -430,6 +438,22 @@ def get_norm(tfms):
         if is_norm(t):
             return t
     return False
+
+def get_norm_id(tfms):
+    try:
+        tfms_list = list(tfms)
+    except:
+        tfms_list = list(tfms.transforms)
+    for i,t in enumerate(tfms_list):
+        if is_norm(t):
+            return t,i
+    return None, None
+
+def del_norm(tfms, idx=None):
+    if idx is None:
+        idx = get_norm_id(tfms)[1]
+    if idx is not None:
+        del tfms.transforms.transforms[idx]
 
 def is_device(x):
     return isinstance(x, torch.device)
@@ -941,12 +965,12 @@ def vid_to_frames(v, dest_folder='', name='frame%05d.jpg', fps=30):
     imgs = vid.write_images_sequence(str(vp/name), fps=fps)
     return imgs
 
-def extract_frames(v, fps=30):
-    if isinstance(v, str) or isinstance(v, Path):
+def extract_frames(v, t0=0, t1=None, fps=30):
+    if path_or_str(v):
         vid = editor.VideoFileClip(str(v))
     else:
         vid = v
-    return list(vid.iter_frames(fps))
+    return list(vid.subclip(t0,t1).iter_frames(fps))
 
 def vid_folders_to_frames(video_dict, video_path='videos', frame_path='frames',
                           frame_name='frame%05d.jpg', fps=30):
@@ -972,39 +996,65 @@ def add_text(img, text, x_factor=2, y_factor=2, font=cv2.FONT_HERSHEY_SIMPLEX, s
     return img
 
 def add_text_pil(img, text=['DreamAI'], x=None, y=None, font='verdana', font_size=None,
-                 color='white', stroke_width=0, stroke_fill='blue', align='center'):
+                 color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
 
-    if type(text) == str:
+    if is_str(text):
         text = [text]
     x_,y_ = x,y
-    if isinstance(img, str):
+    offset = 0
+    if is_str(img):
         img = Image.open(img)
     elif isinstance(img, Path):
         img = Image.open(str(img))
     elif isinstance(img, np.ndarray):
         img = Image.fromarray(img)
+    d = ImageDraw.Draw(img)
+    sizes = []
     for i,txt in enumerate(text):
         if font_size is None:
             font_size = img.size[1]
             s = img.size
-            while sum(np.array(s) < img.size) < 2:
+            while not ((np.array(s)*5) < img.size).all():
                 font_size -= int(img.size[1]/10)
                 fnt = ImageFont.truetype(get_font(font), font_size)
-                d = ImageDraw.Draw(img)
+                # d = ImageDraw.Draw(img)
                 s = fnt.getsize(txt)
         else:
             fnt = ImageFont.truetype(get_font(font), font_size)
-            d = ImageDraw.Draw(img)
+            # d = ImageDraw.Draw(img)
             s = fnt.getsize(txt)
-        # stroke_width = font_size//30
-        offset = i * int(s[1]*1.5)
+        sizes.append(s)
+    sizes = np.array(sizes)
+    if bg is not None:
+        bg_w = sizes[:,0].max()+20
+        bg_h = sizes[:,1].sum()*2
+        if x_ is None:
+            x = (img.size[0]//2) - (bg_w//2)
+        if y_ is None:
+            y = (img.size[1]//2) - (bg_h//2)
+        d.rectangle(((x,y),(x+bg_w, y+bg_h)), fill=bg)
+    
+    for i,data in enumerate(zip(text, sizes)):
+        txt,s = data
+        if i > 0:
+            offset += int(s[1]*1.5)
         if x_ is None:
             x = (img.size[0]//2) - (s[0]//2)
         if y_ is None:
-            y = (img.size[1]//2) - (s[1]//2) - (s[1]*(len(text)-1)) + offset
-        d.text((x, y), txt, font=fnt, fill=color, align=align, stroke_width=stroke_width, stroke_fill=stroke_fill)
+            y = (img.size[1]//2) - (s[1]//2) - (s[1]*(len(text)-1))
+        d.text((x, y+offset), txt, font=fnt, fill=color, align=align, stroke_width=stroke_width, stroke_fill=stroke_fill)
     img = np.array(img)
     return img
+
+def text_size(txt, font='dejavu serif', font_size=10):
+
+    fnt = ImageFont.truetype(get_font(font), font_size)
+    s = np.array((0,0))
+    if not list_or_tuple(txt):
+        txt = [txt]
+    for t in txt:
+        s += fnt.getsize(t)
+    return s
 
 def remove_from_list(l, r):
     for x in r:
@@ -1041,8 +1091,9 @@ def color_to_rgb(color):
 def get_font(font):
     fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if ((font.lower() in f.name.lower()) and not ('italic' in f.name.lower()))]
     if len(fonts) == 0:
-        print(f'"{font.capitalize()}" font not found.')
         fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if (('serif' in f.name.lower()) and not ('italic' in f.name.lower()))]
+        print(f'"{font.capitalize()}" font not found. Using "{Path(fonts[0]).stem.capitalize()}"')
+
     return fonts[0]
 
 def expand_rect(left,top,right,bottom,H,W, margin = 15):
@@ -1145,7 +1196,8 @@ def path_list(path, suffix=None, make_str=False, map_fn=noop):
         l = list_map(l, str)
     return l
 
-def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=None, reverse=False, only_dirs=False):
+def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=None,
+                 reverse=False, only_dirs=False, full_path=True):
 
     if suffix is None:
         l = p_list(path)
@@ -1161,6 +1213,8 @@ def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=None, rever
         l = sorted(l, key=key, reverse=reverse)
     if map_fn is not None:
         l = list_map(l, map_fn)
+    if not full_path:
+        l = list_map(l, lambda x:x.name)
     if make_str:
         l = list_map(l, str)
     return l

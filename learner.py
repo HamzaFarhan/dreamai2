@@ -223,12 +223,17 @@ class ObjCallback(BasicCallback):
         super().__init__()
         self.obj_output = obj_output
 
+    def after_val_batch(self):
+        det_boxes, det_labels, det_scores = get_obj_detection(self.val_batch_out)
+        true_boxes, true_labels = get_obj_true(self.data_batch)
+        self.learner.val_batch_loss = calculate_mAP(det_boxes=det_boxes, det_labels=det_labels, det_scores=det_scores,
+                                                    true_boxes=true_boxes, true_labels=true_labels,
+                                                    class_names=self.dls.class_names, device=self.model.device)[1]
+        self.learner.val_running_loss += self.val_batch_loss
+
     def after_val_epoch(self):
         self.learner.val_ret = {}
-        obj_results = do_obj_eval(self.dls, self.model.model, name='valid',
-                                  output_folder=self.obj_output)['bbox']
-        print(obj_results)
-        self.learner.val_ret = merge_dicts(self.val_ret, obj_results)
+        self.learner.val_ret['MAP'] = self.val_running_loss/self.num_batches
 
 def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):
 
@@ -450,7 +455,6 @@ class Ensemble():
         outputs = torch.sum(outputs, dim=0).unsqueeze(0)
         return outputs
 
-
 class Learner:
     def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()]):
 
@@ -554,11 +558,13 @@ class Learner:
     def train_batch(self):
         self('before_train_batch')
         if self.semi_sup:
-            self.tr_batch_loss = self.model.ss_batch_to_loss(self.data_batch, class_weights=self.class_weights[0],
-                                                             extra_loss_func=self.extra_loss_func)[0]
+            self.tr_batch_loss, self.tr_batch_out = self.model.ss_batch_to_loss(self.data_batch,
+                                                               class_weights=self.class_weights[0],
+                                                               extra_loss_func=self.extra_loss_func)
         else:
-            self.tr_batch_loss = self.model.batch_to_loss(self.data_batch, class_weights=self.class_weights[0],
-                                                          extra_loss_func=self.extra_loss_func)[0]
+            self.tr_batch_loss, self.tr_batch_out = self.model.batch_to_loss(self.data_batch,
+                                                               class_weights=self.class_weights[0],
+                                                               extra_loss_func=self.extra_loss_func)
         if self.fit_scheduler is not None:
             self.fit_scheduler.step()
             # print(get_lr(self.model.optimizer))
@@ -566,10 +572,10 @@ class Learner:
     
     def val_batch(self):
         self('before_val_batch')
-        self.val_batch_loss = self.model.val_batch_to_loss(self.data_batch, metric=self.learn_metric,
-                                                           classifier=self.classifier, thresh=self.pred_thresh,
-                                                           class_weights=self.class_weights[-1],
-                                                           extra_loss_func=self.extra_loss_func)[0]
+        self.val_batch_loss, self.val_batch_out = self.model.val_batch_to_loss(self.data_batch, metric=self.learn_metric,
+                                                  classifier=self.classifier, thresh=self.pred_thresh,
+                                                  class_weights=self.class_weights[-1],
+                                                  extra_loss_func=self.extra_loss_func)
         self('after_val_batch')
     
     def train_epoch(self):
@@ -577,8 +583,8 @@ class Learner:
         dl = self.dls.train
         # self.num_batches = len(dl)
         self.num_batches = num_batches(dl)
-        # for self.batch_num, self.data_batch in enumerate(dl):
-        for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
+        for self.batch_num, self.data_batch in enumerate(dl):
+        # for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
             self.train_batch()
             if self.print_progress:
                 self.print_train_progress()
@@ -590,8 +596,8 @@ class Learner:
         # self.num_batches = len(dl)
         self.num_batches = num_batches(dl)
         with torch.no_grad():
-            # for self.batch_num, self.data_batch in enumerate(dl):
-            for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
+            for self.batch_num, self.data_batch in enumerate(dl):
+            # for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
                 self.val_batch()
         self('after_val_epoch')
         if self.print_progress:

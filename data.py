@@ -27,11 +27,7 @@ class DaiDataset(Dataset):
         return img_name
 
     def get_img_path(self, index):
-        try:
-            img_path = os.path.join(self.data_dir, self.data.iloc[index, 0])
-        except:
-            img_path = os.path.join(self.data_dir, self.data[index, 0])
-        return img_path
+        return os.path.join(self.data_dir, self.get_name(index))
 
     def get_img(self, index):
         img_path = self.get_img_path(index)
@@ -48,11 +44,12 @@ class DaiDataset(Dataset):
         try:
             y = self.data.iloc[index, 1]
         except:
-            y = self.data[index, 1]                    
+            y = self.data[index, 1]
+        y2 = self.get_show_label(y, index)                 
         if str_to_index:
             if is_str(y) and hasattr(self, 'class_names'):
                 y = self.class_names.index(y)
-        return y
+        return y, y2
 
     def get_tta(self, **kwargs):
         img,y,name = kwargs['img'], kwargs['y'], kwargs['name']
@@ -62,19 +59,19 @@ class DaiDataset(Dataset):
         ret_tta = [{'x':apply_tfms(img.copy(),t), 'label':y, 'name':name} for t in self.tta]
         return ret_tta
 
-    def get_x(self, to_tensor=False, **kwargs):
+    def get_x(self, to_tensor=True, **kwargs):
         img = kwargs['img']
         if self.tfms is not None:
             x = apply_tfms(img.copy(), self.tfms)
             if self.channels == 1:
                 x = x.unsqueeze(0)
-            if to_tensor:
+            if not to_tensor:
                 x = tensor_to_img(x)
         else:
             x = img
         return x
 
-    def get_ss(self, to_tensor=False):
+    def get_ss(self, to_tensor=True):
 
         index2 = random.choice(range(len(self.data)))
         try:
@@ -102,7 +99,7 @@ class DaiDataset(Dataset):
         img2 = apply_tfms(img2, img2_tfms)
         if self.channels == 1:
             img2 = img2.unsqueeze(0)
-        if to_tensor:
+        if not to_tensor:
             x2 = tensor_to_img(x2)
             img2 = tensor_to_img(img2)
         return x2,img2
@@ -120,15 +117,16 @@ class DaiDataset(Dataset):
 
     def get_ret(self, **kwargs):
         l = locals_to_params(locals())
-        remove_key_fn(l, lambda x: x not in ['x', 'y', 'name'])
+        remove_key(l, lambda x: x not in ['x', 'y', 'y2', 'name'])
         change_key_name(l, 'y', 'label')
+        change_key_name(l, 'y2', 'show_label')
         return l
 
-    def __getitem__(self, index, to_tensor=False):
+    def __getitem__(self, index, to_tensor=True, str_to_index=True):
         # name = self.get_name(index=index)
         name = self.get_img_path(index=index)
         img = self.get_img(index=index)
-        y = self.get_y(index=index)
+        y,y2 = self.get_y(index=index, str_to_index=str_to_index)
         if self.do_tta:
             return self.get_tta(**locals_to_params(locals()))
         x = self.get_x(**locals_to_params(locals()))
@@ -174,15 +172,11 @@ class DaiDataset(Dataset):
             label = y
         return label
 
-    def get_at_index(self, index, denorm=True, show=True):
+    def get_at_index(self, index, denorm=True, show=True, to_tensor=False):
 
-        data = self.__getitem__(index, to_tensor=True)
-        y = self.get_y(index=index, str_to_index=False)
-        show_label = self.get_show_label(y=y, index=index)
+        data = self.__getitem__(index, to_tensor=to_tensor, str_to_index=False)
         if denorm:
             self.denorm_data(data=data)
-        data['label'] = y
-        data['show_label'] = show_label
         ret = data
         if show:
             self.show_data(data=data)

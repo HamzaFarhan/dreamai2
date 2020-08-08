@@ -12,8 +12,10 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
-def default_device():
-    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def default_device(device=None):
+    if device is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    return device
 
 def save_obj(path, obj):
     with open(path, 'wb') as f:
@@ -234,6 +236,12 @@ def split_df(train_df, test_size=0.15, stratify_idx=1, seed=2):
 
 def df_row_to_cols(df, idx=0):
     return df.copy().rename(columns=df.iloc[0]).drop(df.index[0]).dropna().reset_index(drop=True)
+
+def rename_df_col(df, cols):
+    df_cols = df.columns.tolist()
+    col_dict = {k:v for k,v in zip(df_cols, cols)}
+    df = df.rename(columns=col_dict, inplace=False)
+    return df
 
 def shift_df_col(df, id1=-1, id2=1):
     cols = df.columns.to_list()

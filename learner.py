@@ -241,7 +241,7 @@ class ObjCallback(BasicCallback):
         self.coco_evaluator.synchronize_between_processes()
         self.coco_evaluator.accumulate()
         self.coco_evaluator.summarize()
-        self.learner.val_ret = coco_evaluator.coco_eval['bbox'].metric_dict
+        self.learner.val_ret = self.coco_evaluator.coco_eval['bbox'].metric_dict
         # self.learner.val_ret['MAP'] = self.val_running_loss/self.num_batches
 
 def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):

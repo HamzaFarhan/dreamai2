@@ -179,6 +179,10 @@ class BasicCallback(Callback):
         if 'accuracy' in self.learn_metric:
             self.learner.classifier = Classifier(self.dls.class_names)
     
+    def before_val_batch(self):
+        if not hasattr(self.learner, 'classifier'):
+            self.learner.classifier = None
+
     def after_val_batch(self):
         if self.val_batch_loss is not None:
             self.learner.val_running_loss += self.val_batch_loss
@@ -223,17 +227,22 @@ class ObjCallback(BasicCallback):
         super().__init__()
         self.obj_output = obj_output
 
+    def before_val_epoch(self):
+        coco = get_coco_api_from_dataset(self.dls.valid_ds)
+        iou_types = get_iou_types(self.model.model)
+        self.learner.coco_evaluator = CocoEvaluator(coco, iou_types)
+
     def after_val_batch(self):
-        det_boxes, det_labels, det_scores = get_obj_detection(self.val_batch_out)
-        true_boxes, true_labels = get_obj_true(self.data_batch)
-        self.learner.val_batch_loss = calculate_mAP(det_boxes=det_boxes, det_labels=det_labels, det_scores=det_scores,
-                                                    true_boxes=true_boxes, true_labels=true_labels,
-                                                    class_names=self.dls.class_names, device=self.model.device)[1]
-        self.learner.val_running_loss += self.val_batch_loss
+        _, targets = self.data_batch
+        res = {target["image_id"].item(): output for target, output in zip(targets, self.val_batch_out)}
+        self.coco_evaluator.update(res)
 
     def after_val_epoch(self):
-        self.learner.val_ret = {}
-        self.learner.val_ret['MAP'] = self.val_running_loss/self.num_batches
+        self.coco_evaluator.synchronize_between_processes()
+        self.coco_evaluator.accumulate()
+        self.coco_evaluator.summarize()
+        self.learner.val_ret = coco_evaluator.coco_eval['bbox'].metric_dict
+        # self.learner.val_ret['MAP'] = self.val_running_loss/self.num_batches
 
 def cyclical_lr(stepsize, min_lr=3e-2, max_lr=3e-3):
 

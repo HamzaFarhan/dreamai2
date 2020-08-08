@@ -1,7 +1,6 @@
 from .utils import *
 # from .obj import *
 from .plot_eval import *
-from detectron2.utils.events import EventStorage
 
 def efficientnet_b0(num_channels=10, in_channels=3, **kwargs):
     return EfficientNet.from_pretrained('efficientnet-b0',
@@ -817,22 +816,38 @@ class DaiObjModel(DaiModel):
                  load_opt=False, load_misc=False, **kwargs):
         super().__init__(**locals_to_params(locals()))
     
-    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
-        with EventStorage(0) as storage:
-            if device is None:
-                device = self.device
+    def extract_batch(self, data_batch, device=None):
+        if device is None:
+            device = self.device
+        images, targets = data_batch
+        images = list(image.to(device) for image in images)
+        if self.model.training:
+            targets = [{k:v for k,v in t.items() if is_tensor(v)} for t in targets]
+            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        else:
+            del targets
+            targets = None
+        return images, targets
 
-            loss_dict = self.model(data_batch)
-            loss = sum(loss_dict.values())
-            if backward_step:
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
+    def batch_to_loss(self, data_batch, backward_step=True, device=None, **kwargs):
+        if device is None:
+            device = self.device
+        images, targets = self.extract_batch(data_batch, device)
+
+        loss_dict = self.model(images, targets)
+        loss = sum(loss for loss in loss_dict.values())
+        if backward_step:
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
         return loss.item(), loss_dict
     
     def val_batch_to_loss(self, data_batch, metric='loss', **kwargs):
         # return self.batch_to_loss(data_batch, backward_step=False)
-        outputs = self.model(data_batch)
+        cpu_device = torch.device('cpu')
+        images, _ = self.extract_batch(data_batch)
+        outputs = self.model(images)
+        outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
         return None, outputs
 
     def predict(self, x, actv=None, device=None):

@@ -6,6 +6,7 @@ from torch import mm
 import torch.nn as nn
 import torch.optim as optim
 import torch.tensor as tensor
+from torchvision.ops import nms
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
@@ -14,8 +15,11 @@ from torchvision.datasets.folder import*
 import torchvision.transforms.functional as TF
 from torch.utils.data.sampler import RandomSampler
 from torchvision import datasets, models, transforms
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.models.detection import fasterrcnn_resnet50_fpn, mask_rcnn
 from torchvision.models.segmentation import deeplabv3_resnet50,deeplabv3_resnet101
-from torchvision.models import (vgg16,vgg16_bn,densenet121,resnet18,resnet34,resnet50,resnet101,resnet152,resnext50_32x4d,resnext101_32x8d)
+from torchvision.models import (vgg16,vgg16_bn,densenet121,resnet18,resnet34,resnet50,resnet101,resnet152,
+                                resnext50_32x4d,resnext101_32x8d)
 
 import re
 import io

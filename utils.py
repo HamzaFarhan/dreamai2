@@ -509,9 +509,14 @@ def has_norm(tfms):
 
 def to_tensor(x):
     t = AT.ToTensor()
+    def _t(x):
+        if is_tensor(x):
+            return x
+        else:
+            return t(image=x)['image']
     if type(x) == list:
-        return [t(image=i)['image'] for i in x]
-    return t(image=x)['image']
+        return [_t(i) for i in x]
+    return _t(x)
 
 def batchify_dict(d):
     for k in d.keys():
@@ -1063,6 +1068,138 @@ def text_size(txt, font='dejavu serif', font_size=10):
     for t in txt:
         s += fnt.getsize(t)
     return s
+
+def wrap_text(img, text, x=None, y=None, font_size=None, font='dejavu serif'):
+
+    d = ImageDraw.Draw(img)
+    x_,y_ = img.size
+    txt = text
+    # ratio = 11/12
+    ratio = None
+    if x is None:
+        ratio = 1/2
+        w = x_*ratio
+        # x = x_*ratio
+    else:
+        w = x_-x
+        # x = x_-x
+        # print(x)
+    if font_size is None:
+        font_size = img.size[1]
+        s = img.size
+        while (s[0] >= w) and (s[1] > y_/18):
+            text_y = s[1]
+            font_size -= int(font_size/10)
+            fnt = ImageFont.truetype(get_font(font), font_size)
+            s = np.array(fnt.getsize(txt))
+        font_size -= int(font_size/10)
+    fnt = ImageFont.truetype(get_font(font), font_size)
+    s = np.array(fnt.getsize(txt))
+    if s[0] >= w:
+        final_text = []
+        ts = text.split()
+        diff = 1-(s[0] - w)/s[0]
+        idx = int(diff*len(ts))
+        if ':' in ts[idx-1]:
+            idx -= 2
+        elif ':' in ts[idx]:
+            idx -= 1
+        t1 = ' '.join(ts[:idx])
+        t2 = ' '.join(ts[idx:])
+        final_text.append(t1)
+        s = np.array(fnt.getsize(t2))
+        while s[0] >= w:
+            ts = t2.split()
+            diff = 1-(s[0] - w)/s[0]
+            idx = int(diff*len(ts))
+            t1 = ' '.join(ts[:idx])
+            t2 = ' '.join(ts[idx:])
+            final_text.append(t1)
+            s = np.array(fnt.getsize(t2))
+        final_text.append(t2)
+    else:
+        final_text = [text]
+    # else:
+        # fnt = ImageFont.truetype(get_font(font), font_size)
+        # final_text = [text]
+    final_text = '\n'.join(final_text)
+    text_x, text_y = d.multiline_textsize(final_text, font=fnt)
+    if y is None:
+        y = (y_//2) - text_y//2
+    text_y = y_ - text_y# int(text_y*1.5)
+    if y <= text_y:
+        text_y = y
+    if x is None:
+        text_x = w - text_x//2
+    else:
+        text_x = x
+    return final_text, fnt, text_x, text_y
+
+def add_text_pil_2(img, text='DreamAI', x=None, y=None, font='dejavu serif', font_size=None,
+                   color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
+
+    y_dict = {'top':img.size[1]*(1/50), 'middle':None, 'bottom':img.size[1]*(8/9)}
+    # x_dict = {'left':img.size[0]*(1/50), 'middle':None, 'right':img.size[1]*(8/9)}
+
+    if is_str(y):
+        y = y_dict[y]
+
+    if is_list(text):
+        text = ' '.join(text)
+    if x is not None: x = int(x)
+    if y is not None: y = int(y)
+    if is_str(img):
+        img = Image.open(img)
+    elif isinstance(img, Path):
+        img = Image.open(str(img))
+    elif isinstance(img, np.ndarray):
+        img = Image.fromarray(img)
+    text, fnt, text_x, text_y = wrap_text(img, text, x=x, y=y, font_size=font_size, font=font) 
+    # print(text)
+    d = ImageDraw.Draw(img)
+    text_size = d.multiline_textsize(text, font=fnt)
+    if color is None:
+        size_w, size_h = text_size
+        bg = np.array(img.convert('RGB'))[text_y:size_h+text_y, text_x:size_w+text_x]
+        # plt_show(bg)
+        rgb_mean = np.mean(k_dominant_colors(bg, 2),axis=0)
+        color_mean = np.mean(rgb_mean)
+
+        def get_target_color_bg():
+            if color_mean > 155:
+                target_color = 55
+            elif color_mean < 125:
+                target_color = 255
+            else:
+                # print(color_mean)
+                rb = random.randint(200,255)
+                gb = random.randint(200,255)
+                bb = random.randint(200,255)
+                background_color = (rb,gb,bb)
+                bx = text_x-5
+                by = text_y-5
+                d.rectangle(((bx,by),(bx+size_w+5, by+size_h+5)), fill=background_color)
+                target_color = 55
+            return target_color
+
+        def get_target_color():
+            if color_mean > 150:
+                target_color = 55
+            else:
+                target_color = 255
+            return target_color
+        
+        target_color = get_target_color()
+        # target_color = get_target_color()
+
+        r = random.randint(target_color-55, target_color)
+        g = random.randint(target_color-55, target_color)
+        b = random.randint(target_color-55, target_color)
+        color = (r,g,b)
+    d.multiline_text((text_x, text_y), text, fill=color, font=fnt, align=align,
+                     stroke_width=stroke_width, stroke_fill=stroke_fill)
+    img = np.array(img)
+    return img
 
 def remove_from_list(l, r):
     for x in r:

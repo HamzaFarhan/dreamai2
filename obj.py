@@ -218,18 +218,18 @@ def visualize_bbox(img, bbox, class_name='person', color='green', thickness=2):
     color = color_to_rgb(color)
     bbox = list_map(bbox, int)
     x_min, y_min, x_max, y_max = bbox
-   
     cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color=color, thickness=thickness)
     
     ((text_width, text_height), _) = cv2.getTextSize(class_name, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)    
-    cv2.rectangle(img, (x_min, y_min - int(1.3 * text_height)), (x_min + text_width, y_min), color, -1)
+    cv2.rectangle(img, (x_min, y_min - int(1.3 * text_height)), (int(x_min + text_width*1.5), y_min), color, -1)
     cv2.putText(
         img,
         text=class_name,
-        org=(x_min, y_min - int(0.3 * text_height)),
+        org=(x_min+10, y_min - int(0.3 * text_height)),
         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-        fontScale=0.35, 
-        color=(255,255,255), 
+        fontScale=0.4, 
+        # color=(255,255,255),
+        color=color_to_rgb('black'),
         lineType=cv2.LINE_AA,
     )
     return img
@@ -240,5 +240,6 @@ def bb_image(image, bboxes, cats, class_names=None, color='red'):
         class_name = cat
         if class_names is not None:
             class_name = class_names[cat]
+        bbox = [int(x) for x in bbox]
         img = visualize_bbox(img, bbox, class_name, color=color)
     return img

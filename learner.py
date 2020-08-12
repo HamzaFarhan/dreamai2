@@ -100,8 +100,8 @@ class CheckpointCallback(Callback):
             if self.print_progress:
                 top = f'\n**********Updating best {self.save_metric}**********\n'
                 print(top)
-                print(f'Previous best: {self.curr_best:.3f}')
-                print(f'New best: {curr_metric:.3f}\n')
+                print(f'Previous best: {self.curr_best:.5f}')
+                print(f'New best: {curr_metric:.5f}\n')
                 bottom = '*'*(len(top)-2)
                 print(f'{bottom}\n')
             self.curr_best = curr_metric
@@ -373,9 +373,9 @@ class Ensemble():
         self.to_train()
 
         ret = {}
-        # print('Running_loss: {:.3f}'.format(running_loss))
+        # print('Running_loss: {:.5f}'.format(running_loss))
         if metric == 'rmse':
-            print('Total rmse: {:.3f}'.format(rmse_))
+            print('Total rmse: {:.5f}'.format(rmse_))
             ret['final_rmse'] = rmse_/n_batches
 
         ret['final_loss'] = running_loss/n_batches
@@ -515,13 +515,13 @@ class Learner:
 
             print('+----------------------------------------------------------------------+')
             print(f" {time.asctime().split()[-2]}")
-            # print(f" Time elapsed: {elapsed:.3f}{measure} / {total_time:.3f}{total_measure}")
-            print(f" Time elapsed: {elapsed:.3f} {measure}")
+            # print(f" Time elapsed: {elapsed:.5f}{measure} / {total_time:.5f}{total_measure}")
+            print(f" Time elapsed: {elapsed:.5f} {measure}")
             print(f" Epoch:{self.curr_epoch+1}/{self.fit_epochs}")
             print(f" Batch: {self.batch_num+1}/{self.num_batches}")
-            print(f" Batch training time: {batch_time:.3f} {measure2}")
-            print(f" Batch training loss: {self.tr_batch_loss:.3f}")
-            print(f" Average training loss: {self.tr_running_loss/(self.batch_num+1):.3f}")
+            print(f" Batch training time: {batch_time:.5f} {measure2}")
+            print(f" Batch training loss: {self.tr_batch_loss:.5f}")
+            print(f" Average training loss: {self.tr_running_loss/(self.batch_num+1):.5f}")
             if len(progress) > 0:
                 prog_keys = list(progress.keys())
                 for k in prog_keys[:-1]:
@@ -875,9 +875,9 @@ class Learner:
         if do_tta_ is not None:
             dl.dataset.do_tta = do_tta_
         ret = {}
-        # print('Running_loss: {:.3f}'.format(running_loss))
+        # print('Running_loss: {:.5f}'.format(running_loss))
         if metric == 'rmse':
-            print('Total rmse: {:.3f}'.format(rmse_))
+            print('Total rmse: {:.5f}'.format(rmse_))
             ret['final_rmse'] = rmse_/n_batches
 
         ret['final_loss'] = running_loss/n_batches

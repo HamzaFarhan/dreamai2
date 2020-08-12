@@ -850,27 +850,19 @@ class DaiObjModel(DaiModel):
         outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
         return None, outputs
 
-    def predict(self, x, actv=None, device=None):
-
-        if device is None:
-            device = self.device
-    
-        self.eval()
-        self.model.eval()
-        self.model = self.model.to(device)
-        with torch.no_grad():
-            # print(x.shape)
-            if is_dict(x):
-                outputs,_ = self.process_batch(x, device=device)
-            else:
-                if is_tensor(x):
-                    if x.dim() == 3:
-                        x.unsqueeze_(0)
-                elif is_array(x):
-                    x = to_tensor(x).unsqueeze(0)
-                    # print(x)
-                x = x.to(device)
-                outputs = self.forward(x)
-        if actv is not None:
-            return actv(outputs)
-        return outputs
+    def predict(self, img, score_thresh=0.5, class_names=None, device=None):
+        device = default_device()
+        self.model.eval().to(device)
+        img = to_tensor(img)
+        if not is_list(img):
+            img = [img]
+        img = [i.to(device) for i in img]
+        preds = self.model(img)
+        for i,pred in enumerate(preds):
+            mask = pred['scores'] >= score_thresh
+            preds[i]['boxes'] = pred['boxes'][mask].detach().cpu()
+            preds[i]['labels'] = pred['labels'][mask].detach().cpu()
+            preds[i]['scores'] = pred['scores'][mask].detach().cpu()
+            if class_names is not None:
+                preds[i]['labels'] = [class_names[l] for l in preds[i]['labels']]
+        return preds

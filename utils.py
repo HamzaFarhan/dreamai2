@@ -12,6 +12,9 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
+def int_(x):
+    return int(np.round(x))
+
 def default_device(device=None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -46,9 +49,10 @@ def display_img_actual_size(im_data, title=''):
     plt.title(title,fontdict={'fontsize':25})
     plt.show()
 
-def plt_show(im, cmap=None, title=''):
+def plt_show(im, cmap=None, title='', figsize=(7,7)):
     if isinstance(im, torch.Tensor):
         im = tensor_to_img(im)
+    fig=plt.figure(figsize=figsize)
     plt.imshow(im, cmap=cmap)
     plt.title(title)
     plt.show()
@@ -116,6 +120,8 @@ def img_int_to_float(img):
     return np.clip((np.array(img)/255).astype(np.float),0.,1.)
 
 def rgb_read(img):
+    if not path_or_str(img):
+        return img
     return bgr2rgb(cv2.imread(str(img)))
 
 def c1_read(img):
@@ -135,7 +141,7 @@ def albu_center_crop(img, h, w):
     cc = albu.CenterCrop(h, w)
     return cc(image=img)['image']
 
-def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fig_path = 'fig.png',cmap = None):
+def plot_in_row(imgs, figsize=(20,20), rows=None, columns=None, titles=[], fig_path='fig.png', cmap=None):
     fig=plt.figure(figsize=figsize)
     if len(titles) == 0:
         titles = ['image_{}'.format(i) for i in range(len(imgs))]
@@ -149,8 +155,9 @@ def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fi
             columns = len(imgs)//rows
     for i in range(1, columns*rows +1):
         img = imgs[i-1]
-        fig.add_subplot(rows, columns, i, title = titles[i-1])
-        plt.imshow(img,cmap=cmap)
+        img = rgb_read(img)
+        fig.add_subplot(rows, columns, i, title=titles[i-1])
+        plt.imshow(img, cmap=cmap)
     fig.savefig(fig_path)    
     plt.show()
     return fig
@@ -761,7 +768,7 @@ def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_
 #         batch = batch.to(device)
 #     return batch
 
-def to_batch(paths = [],imgs = [], size = None, channels=3):
+def to_batch(paths=[], imgs=[], size=None, channels=3):
     if len(paths) > 0:
         imgs = []
         for p in paths:
@@ -769,15 +776,13 @@ def to_batch(paths = [],imgs = [], size = None, channels=3):
                 img = bgr2rgb(cv2.imread(p))
             elif channels==1:
                 img = cv2.imread(p,0)
+            cv2.resize(img, size)
             imgs.append(img)
-    for i,img in enumerate(imgs):
-        if size:
-            img = cv2.resize(img, size)
-        img =  img.transpose((2,0,1))
-        imgs[i] = img
-    return torch.from_numpy(np.asarray(imgs)).float()    
+    if not is_list(imgs):
+        imgs = [imgs]
+    return torch.stack(to_tensor(imgs))
 
-def batch_to_imgs(batch,mean=None,std=None):
+def batch_to_imgs(batch, mean=None, std=None):
     imgs = []
     for i in batch:
         if mean is not None:

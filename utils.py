@@ -374,12 +374,26 @@ def remove_key(d, fn):
             del d[k]
 
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
-    model_sd = swap_dict_key_letters(checkpoint['model'], swap_x, swap_y)
+    model_sd = copy.deepcopy(checkpoint)
+    if 'model' in dict_keys(checkpoint):
+        model_sd = swap_dict_key_letters(checkpoint['model'], swap_x, swap_y)
     if only_body:
         remove_key(model_sd, lambda x: x.startswith('1.'))
     elif only_head:
         remove_key(model_sd, lambda x: x.startswith('0.'))
     return model_sd
+
+def filter_dict(d, fn):
+    d2 = {}
+    if is_str(fn):
+        t = copy.deepcopy(fn)
+        fn = lambda x: x==t
+    keys = dict_keys(d)
+    for k in keys:
+        if fn(k):
+            d2[k] = d[k]
+            # del d[k]
+    return d2
 
 def split_params(model, n=3):
     return list_map(np.array_split(params(model), n), list)

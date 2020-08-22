@@ -192,8 +192,14 @@ class BasicCallback(Callback):
         if self.val_batch_loss is not None:
             self.learner.val_ret['loss'] = self.val_running_loss/self.num_batches
         if 'accuracy' in self.learn_metric:
-            self.learner.val_ret[self.learn_metric],\
-            self.learner.val_ret['class_accuracies'] = self.classifier.get_final_accuracies()
+            # self.learner.val_ret[self.learn_metric],\
+            # self.learner.val_ret['class_accuracies'] = self.classifier.get_final_accuracies()
+            acc, class_acc = self.classifier.get_final_accuracies()
+            self.learner.val_ret[self.learn_metric] = acc
+            if is_list(acc):
+                self.learner.val_ret[f'mean {self.learn_metric}'] = tensor(acc).mean().item()
+                # print(self.learner.val_ret[f'mean {self.learn_metric}'])
+            self.learner.val_ret['class_accuracies'] = class_acc
 
     def after_valid(self):
         self.learner.model.train()
@@ -609,7 +615,7 @@ class Learner:
             # for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
                 self.val_batch()
         self('after_val_epoch')
-        if self.print_progress:
+        if self.print_progress or (self.curr_epoch == self.fit_epochs-1):
             self.print_valid_progress()
     
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=None,

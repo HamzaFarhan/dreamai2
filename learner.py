@@ -561,10 +561,11 @@ class Learner:
             for k in prog_keys:
                 v = val_progress[k]
                 if is_list(v):
-                    if len(v) <= 10:
-                        print(f"Epoch validation {k}:")
-                        for x in v:
-                            print(f'    {x}')
+                    if self.verbose or (self.curr_epoch == self.fit_epochs-1):
+                        if len(v) <= 10:
+                            print(f"Epoch validation {k}:")
+                            for x in v:
+                                print(f'    {x}')
                 else:
                     print(f"Epoch validation {k}: {v:.6}")
 
@@ -615,12 +616,12 @@ class Learner:
             # for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
                 self.val_batch()
         self('after_val_epoch')
-        if self.print_progress or (self.curr_epoch == self.fit_epochs-1):
+        if self.print_progress:
             self.print_valid_progress()
     
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=None,
             load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None, pred_thresh=None,
-            class_weights=None, save_best=True, progressive_resizing=None, extra_loss_func=None):
+            class_weights=None, save_best=True, progressive_resizing=None, extra_loss_func=None, verbose=True):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
@@ -633,6 +634,7 @@ class Learner:
         self.fit_scheduler = None
         self.save_class = save_class
         self.print_progress = print_progress
+        self.verbose = verbose
         self.pred_thresh = pred_thresh
         self.save_every = save_every
         self.save_best = save_best
@@ -934,7 +936,7 @@ class Learner:
     def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=None, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
                   print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
-                  progressive_resizing=None, extra_loss_func=None):
+                  progressive_resizing=None, extra_loss_func=None, verbose=True):
 
         def frozen_fit(epochs, c_len, early_stopping_epochs=None):
             print(f'+{"-"*10}+')
@@ -945,7 +947,7 @@ class Learner:
                     save_every=save_every, print_every=print_every, validate_every=validate_every,
                     cycle_len=c_len, save_class=save_class, print_progress=print_progress, save_best=save_best,
                     class_weights=class_weights, pred_thresh=pred_thresh, early_stopping_epochs=early_stopping_epochs,
-                    extra_loss_func=extra_loss_func)
+                    extra_loss_func=extra_loss_func, verbose=verbose)
         
         def unfrozen_fit(epochs, c_len, early_stopping_epochs):
             print()
@@ -957,7 +959,7 @@ class Learner:
                     save_every=save_every, print_every=print_every, validate_every=validate_every, save_best=save_best,
                     early_stopping_epochs=early_stopping_epochs, cycle_len=c_len, save_class=save_class,
                     print_progress=print_progress, pred_thresh=pred_thresh, class_weights=class_weights,
-                    extra_loss_func=extra_loss_func)
+                    extra_loss_func=extra_loss_func, verbose=verbose)
 
         if not list_or_tuple(epochs):
             epochs = [epochs, epochs]

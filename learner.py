@@ -854,7 +854,8 @@ class Learner:
                 running_loss += loss
                 if classifier is not None:
                     # labels = data_batch[1].to(device)
-                    labels = data_batch['label'].to(device)
+                    labels = self.model.open_batch(data_batch, device=device)['labels']
+                    # labels = data_batch['label'].to(device)
                     if metric == 'accuracy':
                         classifier.update_accuracies(outputs, labels)
                         try:
@@ -889,7 +890,12 @@ class Learner:
         ret['final_loss'] = running_loss/n_batches
 
         if classifier is not None:
-            ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
+            acc, class_acc = classifier.get_final_accuracies()
+            ret['accuracy'] = acc
+            if is_list(acc):
+                ret['mean accuracy'] = tensor(acc).mean().item()
+            ret['class_accuracies'] = class_acc    
+            # ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
             try:
                 ret['report'] = ClassificationReport(classification_report(y_true, y_pred,
                                                             target_names=class_names),

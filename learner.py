@@ -561,8 +561,8 @@ class Learner:
             for k in prog_keys:
                 v = val_progress[k]
                 if is_list(v):
-                    if self.verbose or (self.curr_epoch == self.fit_epochs-1):
-                        if len(v) <= 10:
+                    if len(v) <= 10:
+                        if not (is_list(v[0]) and ((not self.verbose) or (self.curr_epoch != (self.fit_epochs-1)))):
                             print(f"Epoch validation {k}:")
                             for x in v:
                                 print(f'    {x}')

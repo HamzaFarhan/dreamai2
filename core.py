@@ -425,10 +425,8 @@ class DaiModel(nn.Module):
             loss = compute_loss_(outputs, labels, class_weights=class_weights)
         return loss
     
-    def process_batch(self, data_batch, device=None):
-        if device is None:
-            device = self.device
-        # inputs,labels = data_batch[0], data_batch[1]
+    def open_batch(self, data_batch, device=None):
+        device = default_device(device)
         inputs = data_batch['x']
         inputs = inputs.to(device)
         labels = None
@@ -441,6 +439,26 @@ class DaiModel(nn.Module):
         meta = None
         if 'meta' in data_batch.keys():
             meta = data_batch['meta'].to(device)
+        return {'inputs': inputs, 'labels': labels, 'meta': meta}
+
+    def process_batch(self, data_batch, device=None):
+        device = default_device(device)
+
+        inputs, labels, meta = dict_values(self.open_batch(data_batch, device))
+
+        # inputs = data_batch['x']
+        # inputs = inputs.to(device)
+        # labels = None
+        # if 'label' in data_batch.keys():
+        #     labels = data_batch['label']
+        #     if is_list:
+        #         labels = [l.to(device) for l in labels]
+        #     else:
+        #         labels = labels.to(device)
+        # meta = None
+        # if 'meta' in data_batch.keys():
+        #     meta = data_batch['meta'].to(device)
+
         outputs = self.forward(inputs, meta=meta)
         return outputs, labels
 

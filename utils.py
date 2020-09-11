@@ -190,6 +190,9 @@ def denorm_tensor(x, img_mean, img_std):
 def next_batch(dl):
     return next(iter(dl))
 
+def model_children(model):
+    return list(model.children())
+
 def filter_modules(net, module):
     return ([(i,n) for i,n in enumerate(list(net.children())) if isinstance(n, module)])
 
@@ -458,6 +461,12 @@ def path_or_str(x):
 def is_norm(x):
     return type(x).__name__ == 'Normalize'
 
+def is_frozen(model):
+    return np.array([not p.requires_grad for p in (params(model))]).all()
+
+def is_unfrozen(model):
+    return np.array([p.requires_grad for p in (params(model))]).all()
+
 def get_norm(tfms):
     try:
         tfms_list = list(tfms)
@@ -548,7 +557,7 @@ def store_attr(self, nms):
     mod = inspect.currentframe().f_back.f_locals
     for n in re.split(', *', nms): setattr(self,n,mod[n])
 
-def noop (x=None, *args, **kwargs):
+def noop(x=None, *args, **kwargs):
     "Do nothing"
     return x
 
@@ -557,17 +566,20 @@ def load_state_dict(model, sd, strict=True, eval=True):
     if eval:
         model.eval()
 
-def set_lr(opt, lr, idx=None):
-    if idx is None:
-        l = len(opt.param_groups) 
-        if l <= 10:
-            idx = [-1]
-        else:
-            idx = range(l)
-    elif not list_or_tuple(idx):
-        idx = [idx]
-    for i in idx:
-        opt.param_groups[i]['lr'] = lr
+def set_lr(opts, lr, idx=None):
+    if not is_list(opts): opts = [opts]
+    for o, opt in enumerate(opts):
+        if idx is None:
+            l = len(opt.param_groups) 
+            if l <= 10:
+                idx = [-1]
+            else:
+                idx = range(l)
+        elif not list_or_tuple(idx):
+            idx = [idx]
+        for i in idx:
+            opt.param_groups[i]['lr'] = lr
+        opts[o] = opt
 
 def get_lr(opt):
     # return opt.param_groups[0]['lr']
@@ -1430,6 +1442,10 @@ def end_of_path(p, n=2):
     for i in range(-(n-1), 0):
         p/=parts[i]
     return p
+
+def extend_path_name(p, ext='_2'):
+    p = Path(p)
+    return p.parent/(p.stem+ext+p.suffix)
 
 def process_landmarks(lm):
     lm_keys = ['chin', 'left_eyebrow', 'right_eyebrow', 'nose_bridge', 'nose_tip',

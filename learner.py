@@ -128,25 +128,6 @@ class CheckpointCallback(Callback):
             # self.learner.model.optimizer.load_state_dict(checkpoint['optimizer'])
             print('Best model loaded.')
 
-class PlotCallback(Callback):
-
-    def __init__(self, liveloss=PlotLosses()):
-        self.liveloss = liveloss
-
-    def before_fit(self):
-        self.logs = {}
-
-    def after_train_epoch(self):
-        self.logs['train_loss'] = self.learner.tr_ret['loss']
-    
-    def after_val_epoch(self):
-        self.logs['val_loss'] = self.learner.val_ret['loss']
-        self.logs['val_accuracy'] = self.learner.val_ret[self.learn_metric]
-
-    def after_valid(self):
-        self.liveloss.update(self.logs)
-        self.liveloss.send()
-
 class BasicCallback(Callback):
     
     def before_fit(self):
@@ -346,7 +327,7 @@ class Ensemble():
         y_true = []
 
         self.to_eval()
-    #         self.model.eval()
+        # self.model.eval()
         rmse_ = 0.
         with torch.no_grad():
             for data_batch in dl:
@@ -445,7 +426,7 @@ class Ensemble():
             if metric == 'accuracy':
                 p = nn.Softmax()(pred_out).cpu()
                 m = torch.max(p, 1)
-    #             c = np.array(self.dls.class_names)[m[1]]
+                # c = np.array(self.dls.class_names)[m[1]]
                 p = p[0]
                 pred_out = {'probs': p, 'pred': m[1]}
 

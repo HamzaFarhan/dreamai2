@@ -6,6 +6,8 @@ class DaiDataset(Dataset):
     def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3,
                  meta_idx=None, do_tta=False, tta=None, num_tta=3,  **kwargs):
         super(DaiDataset, self).__init__()
+        if is_df(data) and len(data.columns) == 1:
+            data['extra_col'] = 'extra'
         store_attr(self,'data,tfms,ss_tfms,meta_idx,do_tta,tta,num_tta,channels')
         self.tfms_list = []
         self.data_dir = str(data_dir)
@@ -1011,7 +1013,8 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
         cols = df.columns.to_list()
         df = df[[cols[0], cols[-1], *cols[1:-1]]]
         return df
-
+    if len(df.columns) == 1:
+        df['extra_col'] = 'extra'
     labels = list(df.iloc[:,1].apply(lambda x: str(x).split()))
     # labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     # is_multi = np.array(pd.Series(labels).apply(lambda x:len(x)>1)).any()

@@ -83,12 +83,13 @@ class MultiHeadModel(nn.Module):
         return [h(x, meta) for h in self.head_list]
 
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
-                bn_final=False, lin_first=False, y_range=None):
+                bn_final=False, lin_first=False, y_range=None, actv=None,
+                relu_fn=nn.ReLU(inplace=True)):
     "Model head that takes `nf` features, runs through `lin_ftrs`, and out `n_out` classes."
     lin_ftrs = [nf, 512, n_out] if lin_ftrs is None else [nf] + lin_ftrs + [n_out]
     ps = [ps]
     if len(ps) == 1: ps = [ps[0]/2] * (len(lin_ftrs)-2) + ps
-    actns = [nn.ReLU(inplace=True)] * (len(lin_ftrs)-2) + [None]
+    actns = [relu_fn] * (len(lin_ftrs)-2) + [None]
     pool = AdaptiveConcatPool2d() if concat_pool else nn.AdaptiveAvgPool2d(1)
     pool_layers = nn.Sequential(*[pool, Flatten()])
     layers = []
@@ -97,19 +98,22 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
         layers += LinBnDrop(ni, no, bn=True, p=p, act=actn, lin_first=lin_first)
     if lin_first: layers.append(nn.Linear(lin_ftrs[-2], n_out))
     if bn_final: layers.append(nn.BatchNorm1d(lin_ftrs[-1], momentum=0.01))
+    if actv is not None:
+        layers.append(actv)
     layers = nn.Sequential(*layers)
     return HeadModel(pool=pool_layers, linear=layers)
 
-def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1, pretrained=True):
+def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
+                 relu_fn=nn.ReLU(inplace=True), actv=None, pretrained=True):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
     if is_iterable(num_classes):
         heads = []
         for nc in num_classes:
-            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc)) 
+            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc, relu_fn=relu_fn, actv=actv)) 
         head = MultiHeadModel(nn.ModuleList(heads))
     else:
-        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes)
+        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes, relu_fn=relu_fn, actv=actv)
     net = nn.Sequential(body, head)
     return net
 
@@ -131,6 +135,13 @@ def model_splitter(model, cut_percentage=0.2, only_body=False):
         ret2 = p[cut:]
         return ret1,ret2
 
+    elif len(model) > 2:
+        p = params(model)
+        cut = int(len(p)*(1-cut_percentage))
+        ret1 = p[:cut]
+        ret2 = p[cut:]
+        return ret1,ret2
+        
     if not only_body:
         ret1, ret2 = params(model[0]), params(model[1])            
         p = params(model[0][0])

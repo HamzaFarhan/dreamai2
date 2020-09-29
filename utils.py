@@ -90,11 +90,17 @@ def denorm_img(x, mean=None, std=None):
 
 def img_on_bg(img, bg, x_factor=1/2, y_factor=1/2):
 
+    # img = Image.fromarray(img)
+    # img_w, img_h = img.size
     img_h, img_w = img.shape[:2]
     background = Image.fromarray(bg)
     bg_w, bg_h = background.size
     offset = (int((bg_w - img_w) * x_factor), int((bg_h - img_h) * y_factor))
-    background.paste(Image.fromarray(img), offset)
+    try:
+        img = Image.fromarray(img)
+    except:
+        img = Image.fromarray(img_as_ubyte(img))
+    background.paste(img, offset)
     img = np.array(background)
     return img
 
@@ -111,7 +117,12 @@ def rgb2gray(img):
     return cv2.cvtColor(img,cv2.COLOR_RGB2GRAY)
 
 def bgra2rgb(img):
-    return cv2.cvtColor(img,cv2.COLOR_BGRA2RGB)
+    if len(img.shape) > 2 and img.shape[2] == 4:
+        return cv2.cvtColor(img,cv2.COLOR_BGRA2RGB)
+
+def rgba2rgb(img):
+    if len(img.shape) > 2 and img.shape[2] == 4:
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
 def img_float_to_int(img):
     return np.clip((np.array(img)*255).astype(np.uint8),0,255)
@@ -1341,7 +1352,7 @@ def get_image_files(path, recurse=True, folders=None, map_fn=None, sort_key=None
     return l
 
 def path_name(x):
-    return x.name
+    return Path(x).name
 
 def last_modified(x):
     return x.stat().st_ctime

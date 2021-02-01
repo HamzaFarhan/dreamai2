@@ -42,11 +42,25 @@ class Callback(GetAttr):
     def before_predict(self): pass
     def after_predict(self): pass
 
+def pushbullet_message(body, title='Update',
+                       token='o.9tvOgIgF7AEurn6imXKpeed4CZpQxOE7'):
+    msg = {"type": "note", "title": title, "body": body}
+    TOKEN = 'PUSHBULLET_TOKEN'
+    resp = requests.post('https://api.pushbullet.com/v2/pushes', 
+                         data=json.dumps(msg),
+                         headers={'Authorization': 'Bearer ' + token,
+                                  'Content-Type': 'application/json'})
+    if resp.status_code != 200:
+        raise Exception('Error',resp.status_code)
+    # else:
+    #     print ('Message sent') 
+
 class CheckpointCallback(Callback):
-    def __init__(self, metric='loss', curr_best=None,# save_every=None,
+    def __init__(self, metric='loss', curr_best=None, send_text=False,
                  save_name='model_checkpoint', best_name='best_model',
                  checkpoint_folder = 'dai_model_checkpoints'):
 
+        self.send_text = send_text
         self.save_metric = metric
         # self.save_every = save_every
         if curr_best is None:
@@ -104,6 +118,9 @@ class CheckpointCallback(Callback):
                 print(f'New best: {curr_metric:.5f}\n')
                 bottom = '*'*(len(top)-2)
                 print(f'{bottom}\n')
+                if self.send_text:
+                    msg = f'{top}\n\nPrevious best: {self.curr_best:.5f}\nNew best: {curr_metric:.5f}\n\n{bottom}'
+                    pushbullet_message(msg)
             self.curr_best = curr_metric
             checkpoint = self.model.checkpoint_dict()
             checkpoint[self.save_metric] = self.curr_best
@@ -602,7 +619,8 @@ class Learner:
     
     def fit(self, epochs, lr=None, metric='loss', print_every=3, validate_every=1, print_progress=True, save_every=None,
             load_best=True, semi_sup=False, early_stopping_epochs=None, cycle_len=0, save_class=None, pred_thresh=None,
-            class_weights=None, save_best=True, progressive_resizing=None, extra_loss_func=None, verbose=True):
+            class_weights=None, save_best=True, progressive_resizing=None, extra_loss_func=None, verbose=True,
+            fit_scheduler=None):
         
         self.fit_epochs = epochs
         self.learn_metric = metric
@@ -612,7 +630,7 @@ class Learner:
         self.semi_sup = semi_sup
         self.early_stopping_epochs = early_stopping_epochs
         self.do_training = True
-        self.fit_scheduler = None
+        self.fit_scheduler = fit_scheduler
         self.save_class = save_class
         self.print_progress = print_progress
         self.verbose = verbose
@@ -917,7 +935,7 @@ class Learner:
     def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=None, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
                   print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
-                  progressive_resizing=None, extra_loss_func=None, verbose=True):
+                  progressive_resizing=None, extra_loss_func=None, verbose=True, fit_scheduler=None):
 
         def frozen_fit(epochs, c_len, early_stopping_epochs=None):
             print(f'+{"-"*10}+')
@@ -928,7 +946,7 @@ class Learner:
                     save_every=save_every, print_every=print_every, validate_every=validate_every,
                     cycle_len=c_len, save_class=save_class, print_progress=print_progress, save_best=save_best,
                     class_weights=class_weights, pred_thresh=pred_thresh, early_stopping_epochs=early_stopping_epochs,
-                    extra_loss_func=extra_loss_func, verbose=verbose)
+                    extra_loss_func=extra_loss_func, verbose=verbose, fit_scheduler=fit_scheduler)
         
         def unfrozen_fit(epochs, c_len, early_stopping_epochs):
             print()
@@ -940,7 +958,7 @@ class Learner:
                     save_every=save_every, print_every=print_every, validate_every=validate_every, save_best=save_best,
                     early_stopping_epochs=early_stopping_epochs, cycle_len=c_len, save_class=save_class,
                     print_progress=print_progress, pred_thresh=pred_thresh, class_weights=class_weights,
-                    extra_loss_func=extra_loss_func, verbose=verbose)
+                    extra_loss_func=extra_loss_func, verbose=verbose, fit_scheduler=fit_scheduler)
 
         if not list_or_tuple(epochs):
             epochs = [epochs, epochs]

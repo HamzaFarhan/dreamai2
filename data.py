@@ -51,6 +51,7 @@ class DaiDataset(Dataset):
         if str_to_index:
             if is_str(y) and hasattr(self, 'class_names'):
                 y = self.class_names.index(y)
+                # y = tensor(self.class_names.index(y))
         return y, y2
 
     def get_tta(self, **kwargs):
@@ -348,7 +349,7 @@ class SimilarityDataset(Dataset):
         if shuffle_data2:
             self.data2 = data.copy()
         else:
-            self.data2 = data.copy().sample(frac=1.).reset_index(drop=True)
+            self.data2 = data.copy().sample(frac=1., random_state=2).reset_index(drop=True)
         self.tfms = tfms
         self.tfms2 = tfms2
         if self.tfms is not None:
@@ -604,7 +605,7 @@ class MatchingDataset(Dataset):
         if shuffle_data2:
             self.data2 = data.copy()
         else:
-            self.data2 = data.copy().sample(frac=1.).reset_index(drop=True)
+            self.data2 = data.copy().sample(frac=1., random_state=2).reset_index(drop=True)
         self.tfms = tfms
         self.tfms2 = tfms2
         if self.tfms is not None:
@@ -914,7 +915,7 @@ class Similarity():
             x = pd.DataFrame({'x': x}, columns=['x'])
         
         data = self.dset(x, tfms=self.tfms)
-#         loader = DataLoader(data, batch_size=bs, num_workers=6, shuffle=False)
+        #loader = DataLoader(data, batch_size=bs, num_workers=6, shuffle=False)
         self.model.to(device).eval()
         embeddings = []
         for idx,data_batch in enumerate(data):
@@ -998,7 +999,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
                        tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
                        pin_memory=True, num_workers=4, force_one_hot=False, meta_idx=None,
                        class_names=None, split=True, val_size=0.2, test_size=0.15,
-                       tta=None, num_tta=3, **kwargs):
+                       tta=None, num_tta=3, multi_delim=' ', **kwargs):
 
     if tta is not None and not list_or_tuple(tta):
         tta = [tta]*num_tta
@@ -1007,7 +1008,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
     def df_one_hot(df):
         df = df.copy()
         # labels = list(df.iloc[:,1].apply(lambda x: str(x).split()))
-        labels = list_map(df.iloc[:,1], lambda x:str(x).split())
+        labels = list_map(df.iloc[:,1], lambda x:str(x).split(multi_delim))
         one_hot_labels = dai_one_hot(labels, class_names)
         df['one_hot'] = list(one_hot_labels)
         cols = df.columns.to_list()
@@ -1015,7 +1016,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
         return df
     if len(df.columns) == 1:
         df['extra_col'] = 'extra'
-    labels = list(df.iloc[:,1].apply(lambda x: str(x).split()))
+    labels = list(df.iloc[:,1].apply(lambda x: str(x).split(multi_delim)))
     # labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     # is_multi = np.array(pd.Series(labels).apply(lambda x:len(x)>1)).any()
     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
@@ -1466,42 +1467,53 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
     return mean.cpu(), std.cpu()
 
 def folders_to_dfs(images_path='', train_name=None, valid_name=None, test_name=None,
-                   full_path=True, shuffle=False, do_str=True):
+                   full_path=True, shuffle=False, do_str=True,
+                   label_fn=lambda x: x.parent.name, folders=None):
     
     train_df = None
     valid_df = None
     test_df = None
 
     if train_name is not None:    
-        imgs = get_image_files(images_path, folders=[train_name])
-        labels = [x.parent.name for x in imgs]    
+        imgs = get_image_files(Path(images_path)/train_name, folders=folders)
+        labels = list_map(imgs, label_fn)    
         if not full_path:
             imgs = [end_of_path(x) for x in imgs]
         if do_str:
             imgs = list_map(imgs, str)
         train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
         if shuffle:
-            train_df = train_df.sample(frac=1.).reset_index(drop=True)
+            train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
+    else:
+        imgs = get_image_files(images_path, folders=folders)
+        labels = list_map(imgs, label_fn)    
+        if not full_path:
+            imgs = [end_of_path(x) for x in imgs]
+        if do_str:
+            imgs = list_map(imgs, str)
+        train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
+        if shuffle:
+            train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
     if valid_name is not None:
-        imgs = get_image_files(images_path, folders=[valid_name])
-        labels = [x.parent.name for x in imgs]
+        imgs = get_image_files(Path(images_path)/valid_name, folders=folders)
+        labels = list_map(imgs, label_fn)
         if not full_path:
             imgs = [end_of_path(x) for x in imgs]
         if do_str:
             imgs = list_map(imgs, str)
         valid_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
         if shuffle:
-            valid_df = valid_df.sample(frac=1.).reset_index(drop=True)
+            valid_df = valid_df.sample(frac=1., random_state=2).reset_index(drop=True)
     if test_name is not None:
-        imgs = get_image_files(images_path, folders=[test_name])
-        labels = [x.parent.name for x in imgs]
+        imgs = get_image_files(Path(images_path)/test_name, folders=folders)
+        labels = list_map(imgs, label_fn)
         if not full_path:
             imgs = [end_of_path(x) for x in imgs]
         if do_str:
             imgs = list_map(imgs, str)
         test_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
         if shuffle:
-            test_df = test_df.sample(frac=1.).reset_index(drop=True)
+            test_df = test_df.sample(frac=1., random_state=2).reset_index(drop=True)
     return train_df, valid_df, test_df
 
 

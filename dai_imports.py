@@ -34,12 +34,14 @@ import shutil
 import pickle
 import random
 import nmslib
-import pilgram
+# import pilgram
 import inspect
 # import skimage
 import logging
 import pathlib
+import requests
 import colorsys
+import traceback
 import itertools
 import matplotlib
 import numpy as np

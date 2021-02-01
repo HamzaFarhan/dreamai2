@@ -104,9 +104,12 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     return HeadModel(pool=pool_layers, linear=layers)
 
 def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
-                 relu_fn=nn.ReLU(inplace=True), actv=None, pretrained=True):
+                 relu_fn=nn.ReLU(inplace=True), actv=None, pretrained=True,
+                 only_body=False, state_dict=None, strict_load=True):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
+    if only_body:
+        return body
     if is_iterable(num_classes):
         heads = []
         for nc in num_classes:
@@ -115,6 +118,7 @@ def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
     else:
         head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes, relu_fn=relu_fn, actv=actv)
     net = nn.Sequential(body, head)
+    load_state_dict(net, sd=state_dict, strict=strict_load)
     return net
 
 # def model_splitter(model, extra_cut=3, only_body=False):
@@ -285,7 +289,10 @@ class Classifier():
             correct = np.squeeze(preds.eq(labels.data.view_as(preds)))
             for i in range(labels.shape[0]):
                 label = labels.data[i].item()
-                class_correct[label] += correct[i].item()
+                try:
+                    class_correct[label] += correct[i].item()
+                except:
+                    class_correct[label] += 0
                 class_totals[label] += 1
 
         if is_list(outputs):
@@ -296,7 +303,7 @@ class Classifier():
 
     def update_multi_accuracies(self, outputs, labels, thresh=0.5):
 
-        def update_multi_accuracies_(outputs, labels):
+        def update_multi_accuracies_(outputs, labels, class_correct, class_totals):
             preds = torch.sigmoid(outputs) > thresh
             correct = (labels==1)*(preds==1)
             for i in range(labels.shape[0]):
@@ -304,8 +311,10 @@ class Classifier():
                 for l in label:
                     c = correct[i][l].item()
                     l = l.item()
-                    self.class_correct[l] += c
-                    self.class_totals[l] += 1
+                    class_correct[l] += c
+                    class_totals[l] += 1
+                    # self.class_correct[l] += c
+                    # self.class_totals[l] += 1
 
         if is_list(outputs):
             for i,(o,l) in enumerate(zip(outputs, labels)):
@@ -443,7 +452,7 @@ class DaiModel(nn.Module):
         labels = None
         if 'label' in data_batch.keys():
             labels = data_batch['label']
-            if is_list:
+            if is_list(labels):
                 labels = [l.to(device) for l in labels]
             else:
                 labels = labels.to(device)

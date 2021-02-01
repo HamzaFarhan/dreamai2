@@ -6,7 +6,7 @@ from .randaug import RandAugment
 image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.djvu','.erf','.gif','.ico',
                     '.ief','.jng','.jp2','.jpe','.jpeg','.jpf','.jpg','.jpg2','.jpm','.jpx','.nef','.orf',
                     '.pat','.pbm','.pcx','.pgm','.png','.pnm','.ppm','.psd','.ras','.rgb','.svg','.svgz',
-                    '.tif','.tiff','.wbmp','.xbm','.xpm','.xwd'}
+                    '.tif','.tiff','.wbmp','.xbm','.xpm','.xwd','.webp'}
 
 # DEFAULTS = {'image_extensions': image_extensions}
 
@@ -50,8 +50,11 @@ def display_img_actual_size(im_data, title=''):
     plt.show()
 
 def plt_show(im, cmap=None, title='', figsize=(7,7)):
-    if isinstance(im, torch.Tensor):
+    if path_or_str(im):
+        im = rgb_read(im)
+    if is_tensor(im):
         im = tensor_to_img(im)
+        if is_list(im): im = im[0]
     fig=plt.figure(figsize=figsize)
     plt.imshow(im, cmap=cmap)
     plt.title(title)
@@ -152,7 +155,8 @@ def albu_center_crop(img, h, w):
     cc = albu.CenterCrop(h, w)
     return cc(image=img)['image']
 
-def plot_in_row(imgs, figsize=(20,20), rows=None, columns=None, titles=[], fig_path='fig.png', cmap=None):
+def plot_in_row(imgs, figsize=(20,20), rows=None, columns=None, titles=[],
+                cmap=None, fig_path='', ret=False):
     fig=plt.figure(figsize=figsize)
     if len(titles) == 0:
         titles = ['image_{}'.format(i) for i in range(len(imgs))]
@@ -167,11 +171,17 @@ def plot_in_row(imgs, figsize=(20,20), rows=None, columns=None, titles=[], fig_p
     for i in range(1, columns*rows +1):
         img = imgs[i-1]
         img = rgb_read(img)
+        if is_tensor(img):
+            img = tensor_to_img(img)
+            if is_list(img):
+                img = img[0]
         fig.add_subplot(rows, columns, i, title=titles[i-1])
         plt.imshow(img, cmap=cmap)
-    fig.savefig(fig_path)    
+    if len(fig_path) > 0:
+        fig.savefig(fig_path)    
     plt.show()
-    return fig
+    if ret:
+        return fig
 
 def get_img_stats(dataset,channels):
 
@@ -313,11 +323,11 @@ def one_hot(targets, multi=False):
         dai_1hot = binerizer.fit_transform(targets)
     return dai_1hot, binerizer.classes_
 
-def folders_to_df(path, imgs_repeat=False):
+def folders_to_df(path, repeat_allowed=False):
 
     imgs = get_image_files(path)
     data = {}
-    if not imgs_repeat:
+    if repeat_allowed:
         for img in imgs:
             n = img.name
             p = img.parent.name
@@ -366,6 +376,10 @@ def dict_values(d):
 def dict_keys(d):
     return list(d.keys())
 
+def sort_dict(d, by_value=False):
+    idx = int(by_value)
+    return {k: v for k, v in sorted(d.items(), key=lambda item:item[idx])}
+
 def swap_dict_key_letters(d, x, y, strict=False):
     if strict:
         return OrderedDict([(k.replace(x, y), v) if x == k else (k, v) for k, v in d.items()])    
@@ -388,6 +402,7 @@ def remove_key(d, fn):
             del d[k]
 
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
+    if checkpoint is None: return None
     model_sd = copy.deepcopy(checkpoint)
     if 'model' in dict_keys(checkpoint):
         model_sd = swap_dict_key_letters(checkpoint['model'], swap_x, swap_y)
@@ -456,6 +471,11 @@ def is_array(x):
 
 def is_pilimage(x):
     return 'PIL' in str(type(x))
+
+def to_pil(x):
+    if is_array(x):
+        return Image.fromarray(x)
+    return x
 
 def is_tensor(x):
     return isinstance(x, torch.Tensor)
@@ -572,8 +592,16 @@ def noop(x=None, *args, **kwargs):
     "Do nothing"
     return x
 
-def load_state_dict(model, sd, strict=True, eval=True):
-    model.load_state_dict(sd, strict=strict)
+def load_state_dict(model, sd=None, strict=True, eval=True):
+    if sd is not None:
+        model.load_state_dict(sd, strict=strict)
+        # try:
+        #     model.load_state_dict(sd, strict=strict)
+        # except:
+        #     try:
+        #         model.load_state_dict(sd, strict=False)
+        #     except:
+        #         pass
     if eval:
         model.eval()
 
@@ -807,13 +835,16 @@ def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_
 
 def to_batch(paths=[], imgs=[], size=None, channels=3):
     if len(paths) > 0:
+        if not is_list(paths):
+            paths = [paths]
         imgs = []
         for p in paths:
             if channels==3:
                 img = bgr2rgb(cv2.imread(p))
             elif channels==1:
                 img = cv2.imread(p,0)
-            cv2.resize(img, size)
+            if size is not None:
+                img = cv2.resize(img, size)
             imgs.append(img)
     if not is_list(imgs):
         imgs = [imgs]
@@ -1302,7 +1333,8 @@ def show_landmarks(image, landmarks):
     plt.show()
 
 def chunkify(l, chunk_size):
-
+    if chunk_size is None:
+        chunk_size = len(l)
     if list_or_tuple(chunk_size):
         l2 = []
         l2.append(l[:chunk_size[0]])
@@ -1313,6 +1345,11 @@ def chunkify(l, chunk_size):
         return l2
 
     return [l[i:i+chunk_size] for i in range(0,len(l), chunk_size)]
+
+def split_list(l, percentage=0.7):
+    ln = len(l)
+    index = int(ln*percentage)
+    return l[:index], l[index:]
 
 def setify(o): return o if isinstance(o,set) else set(list(o))
 

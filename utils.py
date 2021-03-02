@@ -767,8 +767,8 @@ def apply_tfms(img, tfms):
             img = np.array(img)
         return tfms(image=img)['image']
 
-def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
-                  stats_percentage = 1., channels = 3, num_workers = 6):
+def imgs_to_batch(paths=[], imgs=[], bs=1, size=None, norm=False, img_mean=None, img_std=None,
+                  stats_percentage=1., channels=3, num_workers=6):
     if len(paths) > 0:
         data = pd.DataFrame({'Images':paths})
     elif len(imgs) > 0:
@@ -784,11 +784,17 @@ def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_
     if size:
         tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        
     tfms = albu.Compose(tfms)
-    image_dataset = imgs_to_batch_dataset(data = data, transforms_ = tfms, channels = channels)
+    image_dataset = imgs_to_batch_dataset(data=data, transforms_=tfms, channels=channels)
     if size is None:
-        loader = None
+        sizes = [np.shape(x) for x in data.Images]
+        if sizes.count(sizes[0]) == len(sizes):
+            loader = DataLoader(image_dataset, batch_size=bs,
+                                shuffle=True, num_workers=num_workers)
+        else:
+            loader = None        
     else:
-        loader = DataLoader(image_dataset, batch_size = bs, shuffle=True, num_workers = num_workers)
+        loader = DataLoader(image_dataset, batch_size=bs,
+                            shuffle=True, num_workers=num_workers)
     return image_dataset,loader
 
 # def imgs_to_batch_old(paths = [],imgs = [], size = None, smaller_factor = None, enlarge_factor = None, mean = None, std = None,
@@ -1530,7 +1536,7 @@ def remove_pad(img, shape=(256,256)):
 
 class imgs_to_batch_dataset(Dataset):
     
-    def __init__(self, data, transforms_ = None, channels = 3):
+    def __init__(self, data, transforms_=None, channels=3):
         super(imgs_to_batch_dataset, self).__init__()
         self.data = data
         self.transforms_ = transforms_
@@ -1555,7 +1561,7 @@ class imgs_to_batch_dataset(Dataset):
         x = self.tfms(image=img)['image']
         if self.channels == 1:
             x = x.unsqueeze(0)
-        x = x.unsqueeze(0)
+        # x = x.unsqueeze(0)
         return x,img_path
     
 class WeightedMultilabel(nn.Module):

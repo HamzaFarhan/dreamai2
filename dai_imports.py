@@ -63,7 +63,7 @@ import matplotlib.pyplot as plt
 from pprint import PrettyPrinter
 from torchsummary import summary
 from os.path import isfile, join
-from sklearn.cluster import KMeans
+# from sklearn.cluster import KMeans
 import xml.etree.ElementTree as ET
 # from livelossplot import PlotLosses
 from collections import OrderedDict

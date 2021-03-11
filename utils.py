@@ -1214,71 +1214,71 @@ def wrap_text(img, text, x=None, y=None, font_size=None, font='dejavu serif'):
         text_x = x
     return final_text, fnt, text_x, text_y
 
-def add_text_pil_2(img, text='DreamAI', x=None, y=None, font='dejavu serif', font_size=None,
-                   color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
+# def add_text_pil_2(img, text='DreamAI', x=None, y=None, font='dejavu serif', font_size=None,
+#                    color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
 
-    y_dict = {'top':img.size[1]*(1/50), 'middle':None, 'bottom':img.size[1]*(8/9)}
-    # x_dict = {'left':img.size[0]*(1/50), 'middle':None, 'right':img.size[1]*(8/9)}
+#     y_dict = {'top':img.size[1]*(1/50), 'middle':None, 'bottom':img.size[1]*(8/9)}
+#     # x_dict = {'left':img.size[0]*(1/50), 'middle':None, 'right':img.size[1]*(8/9)}
 
-    if is_str(y):
-        y = y_dict[y]
+#     if is_str(y):
+#         y = y_dict[y]
 
-    if is_list(text):
-        text = ' '.join(text)
-    if x is not None: x = int(x)
-    if y is not None: y = int(y)
-    if is_str(img):
-        img = Image.open(img)
-    elif isinstance(img, Path):
-        img = Image.open(str(img))
-    elif isinstance(img, np.ndarray):
-        img = Image.fromarray(img)
-    text, fnt, text_x, text_y = wrap_text(img, text, x=x, y=y, font_size=font_size, font=font) 
-    # print(text)
-    d = ImageDraw.Draw(img)
-    text_size = d.multiline_textsize(text, font=fnt)
-    if color is None:
-        size_w, size_h = text_size
-        bg = np.array(img.convert('RGB'))[text_y:size_h+text_y, text_x:size_w+text_x]
-        # plt_show(bg)
-        rgb_mean = np.mean(k_dominant_colors(bg, 2),axis=0)
-        color_mean = np.mean(rgb_mean)
+#     if is_list(text):
+#         text = ' '.join(text)
+#     if x is not None: x = int(x)
+#     if y is not None: y = int(y)
+#     if is_str(img):
+#         img = Image.open(img)
+#     elif isinstance(img, Path):
+#         img = Image.open(str(img))
+#     elif isinstance(img, np.ndarray):
+#         img = Image.fromarray(img)
+#     text, fnt, text_x, text_y = wrap_text(img, text, x=x, y=y, font_size=font_size, font=font) 
+#     # print(text)
+#     d = ImageDraw.Draw(img)
+#     text_size = d.multiline_textsize(text, font=fnt)
+#     if color is None:
+#         size_w, size_h = text_size
+#         bg = np.array(img.convert('RGB'))[text_y:size_h+text_y, text_x:size_w+text_x]
+#         # plt_show(bg)
+#         rgb_mean = np.mean(k_dominant_colors(bg, 2),axis=0)
+#         color_mean = np.mean(rgb_mean)
 
-        def get_target_color_bg():
-            if color_mean > 155:
-                target_color = 55
-            elif color_mean < 125:
-                target_color = 255
-            else:
-                # print(color_mean)
-                rb = random.randint(200,255)
-                gb = random.randint(200,255)
-                bb = random.randint(200,255)
-                background_color = (rb,gb,bb)
-                bx = text_x-5
-                by = text_y-5
-                d.rectangle(((bx,by),(bx+size_w+5, by+size_h+5)), fill=background_color)
-                target_color = 55
-            return target_color
+#         def get_target_color_bg():
+#             if color_mean > 155:
+#                 target_color = 55
+#             elif color_mean < 125:
+#                 target_color = 255
+#             else:
+#                 # print(color_mean)
+#                 rb = random.randint(200,255)
+#                 gb = random.randint(200,255)
+#                 bb = random.randint(200,255)
+#                 background_color = (rb,gb,bb)
+#                 bx = text_x-5
+#                 by = text_y-5
+#                 d.rectangle(((bx,by),(bx+size_w+5, by+size_h+5)), fill=background_color)
+#                 target_color = 55
+#             return target_color
 
-        def get_target_color():
-            if color_mean > 150:
-                target_color = 55
-            else:
-                target_color = 255
-            return target_color
+#         def get_target_color():
+#             if color_mean > 150:
+#                 target_color = 55
+#             else:
+#                 target_color = 255
+#             return target_color
         
-        target_color = get_target_color()
-        # target_color = get_target_color()
+#         target_color = get_target_color()
+#         # target_color = get_target_color()
 
-        r = random.randint(target_color-55, target_color)
-        g = random.randint(target_color-55, target_color)
-        b = random.randint(target_color-55, target_color)
-        color = (r,g,b)
-    d.multiline_text((text_x, text_y), text, fill=color, font=fnt, align=align,
-                     stroke_width=stroke_width, stroke_fill=stroke_fill)
-    img = np.array(img)
-    return img
+#         r = random.randint(target_color-55, target_color)
+#         g = random.randint(target_color-55, target_color)
+#         b = random.randint(target_color-55, target_color)
+#         color = (r,g,b)
+#     d.multiline_text((text_x, text_y), text, fill=color, font=fnt, align=align,
+#                      stroke_width=stroke_width, stroke_fill=stroke_fill)
+#     img = np.array(img)
+#     return img
 
 def remove_from_list(l, r):
     for x in r:
@@ -1294,12 +1294,12 @@ def max_n(l, n=3):
     idx = heapq.nlargest(n, range(len(a)), a.take)
     return idx, a[idx]
 
-def k_dominant_colors(img, k):
+# def k_dominant_colors(img, k):
 
-    img = img.reshape((img.shape[0] * img.shape[1], 3))
-    clt = KMeans(n_clusters = k)
-    clt.fit(img)
-    return clt.cluster_centers_
+#     img = img.reshape((img.shape[0] * img.shape[1], 3))
+#     clt = KMeans(n_clusters = k)
+#     clt.fit(img)
+#     return clt.cluster_centers_
 
 def solid_color_img(shape=(300,300,3), color='black'):
     image = np.zeros(shape, np.uint8)

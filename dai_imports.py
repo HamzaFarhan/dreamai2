@@ -18,7 +18,7 @@ from torchvision import datasets, models, transforms
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection import fasterrcnn_resnet50_fpn, mask_rcnn
 from torchvision.models.segmentation import deeplabv3_resnet50,deeplabv3_resnet101
-from torchvision.models import (vgg16,vgg16_bn,densenet121,resnet18,resnet34,resnet50,resnet101,resnet152,
+from torchvision.models import (vgg16,vgg16_bn,densenet121,densenet169,resnet18,resnet34,resnet50,resnet101,resnet152,
                                 resnext50_32x4d,resnext101_32x8d)
 
 import re

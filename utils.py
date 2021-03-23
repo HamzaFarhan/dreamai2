@@ -677,7 +677,8 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox
     return tfms1
 
 def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
-             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True, test_tfms=True):
+             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True,
+             distort=True, test_tfms=True):
 
     color_tfms = [albu.HueSaturationValue(p=0.3)]
     distortion = [albu.OneOf([albu.OpticalDistortion(p=0.3),
@@ -706,7 +707,7 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
             albu.RandomBrightnessContrast(),            
         ], p=0.3)
     ]
-    if not bbox:
+    if not bbox and distort:
         extra += distortion
     if color:
         extra += color_tfms
@@ -1301,11 +1302,21 @@ def max_n(l, n=3):
 #     clt.fit(img)
 #     return clt.cluster_centers_
 
-def solid_color_img(shape=(300,300,3), color='black'):
+def solid_color_img(shape=(300,300,3), color='black', alpha=None):
     image = np.zeros(shape, np.uint8)
     color = color_to_rgb(color)
     image[:] = color
+    if alpha is not None:
+        image = Image.fromarray(image)
+        image.putalpha(alpha)
+        image = np.array(image)
     return image
+
+# def solid_color_img(shape=(300,300,3), color='black'):
+#     image = np.zeros(shape, np.uint8)
+#     color = color_to_rgb(color)
+#     image[:] = color
+#     return image
 
 def color_to_rgb(color):
     if type(color) == str:

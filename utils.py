@@ -119,6 +119,9 @@ def gray2rgb(img):
 def rgb2gray(img):
     return cv2.cvtColor(img,cv2.COLOR_RGB2GRAY)
 
+def rgb2rgba(img):
+    return cv2.cvtColor(img,cv2.COLOR_RGB2RGBA)
+
 def bgra2rgb(img):
     if len(img.shape) > 2 and img.shape[2] == 4:
         return cv2.cvtColor(img,cv2.COLOR_BGRA2RGB)
@@ -133,10 +136,13 @@ def img_float_to_int(img):
 def img_int_to_float(img):
     return np.clip((np.array(img)/255).astype(np.float),0.,1.)
 
-def rgb_read(img):
+def rgb_read(img, shape=None):
     if not path_or_str(img):
         return img
-    return bgr2rgb(cv2.imread(str(img)))
+    img = bgr2rgb(cv2.imread(str(img)))
+    if shape is not None:
+        img = cv2.resize(img, (shape[1], shape[0]))
+    return img
 
 def c1_read(img):
     return cv2.imread(str(img), 0)

@@ -33,7 +33,7 @@ import heapq
 import shutil
 import pickle
 import random
-import nmslib
+# import nmslib
 # import pilgram
 import inspect
 # import skimage

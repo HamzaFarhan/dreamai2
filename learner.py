@@ -70,9 +70,9 @@ class CheckpointCallback(Callback):
                 self.curr_best = 0.
         else:
             self.curr_best = curr_best
-        if save_name [-4:] != '.pth' or save_name [-4:] != '.pkl':
+        if Path(save_name).suffix not in ['.pkl','.pth','.pt']:
             save_name = save_name+'.pth'
-        if best_name [-4:] != '.pth' or best_name [-4:] != '.pkl':
+        if Path(best_name).suffix not in ['.pkl','.pth','.pt']:
             best_name = best_name+'.pth'
         # checkpoint_folder = 'dai_model_checkpoints'
         os.makedirs(checkpoint_folder, exist_ok=True)

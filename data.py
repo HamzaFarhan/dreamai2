@@ -1476,24 +1476,24 @@ def folders_to_dfs(images_path='', train_name=None, valid_name=None, test_name=N
 
     if train_name is not None:    
         imgs = get_image_files(Path(images_path)/train_name, folders=folders)
-        labels = list_map(imgs, label_fn)    
-        if not full_path:
-            imgs = [end_of_path(x) for x in imgs]
-        if do_str:
-            imgs = list_map(imgs, str)
-        train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
-        if shuffle:
-            train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
+        # labels = list_map(imgs, label_fn)    
+        # if not full_path:
+        #     imgs = [end_of_path(x) for x in imgs]
+        # if do_str:
+        #     imgs = list_map(imgs, str)
+        # train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
+        # if shuffle:
+        #     train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
     else:
         imgs = get_image_files(images_path, folders=folders)
-        labels = list_map(imgs, label_fn)    
-        if not full_path:
-            imgs = [end_of_path(x) for x in imgs]
-        if do_str:
-            imgs = list_map(imgs, str)
-        train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
-        if shuffle:
-            train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
+    labels = list_map(imgs, label_fn)    
+    if not full_path:
+        imgs = [end_of_path(x) for x in imgs]
+    if do_str:
+        imgs = list_map(imgs, str)
+    train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
+    if shuffle:
+        train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
     if valid_name is not None:
         imgs = get_image_files(Path(images_path)/valid_name, folders=folders)
         labels = list_map(imgs, label_fn)

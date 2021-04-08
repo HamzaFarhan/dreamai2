@@ -849,8 +849,10 @@ class PredDataset(Dataset):
                 img = rgb_read(img_path)
             else:    
                 img = c1_read(img_path)
+            name = img_path
         except:
             img = self.data.iloc[index,0]
+            name = 'img_0'
 
         if self.do_tta:
             if self.tta is None:
@@ -865,7 +867,7 @@ class PredDataset(Dataset):
                 x = x.unsqueeze(0)
         else:
             x = img
-        ret = {}
+        ret = {'name':name}
         ret['x'] = x
         if self.meta_idx is not None:
             if not list_or_tuple(self.meta_idx):

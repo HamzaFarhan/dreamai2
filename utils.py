@@ -310,7 +310,11 @@ def slice_df(df, cols):
     return pd.concat(dfs, axis=1)
 
 def dai_one_hot(labels, class_names):
-    return [(np.in1d(list(class_names), l)*1.) for l in labels]
+    hot = [(np.in1d(list(class_names), l)*1.) for l in labels]
+    for i,h in enumerate(hot):
+        if len(h) == 0:
+            hot[i] = np.array([0.]*len(class_names))
+    return hot
 
 def get_one_hot(df):
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
@@ -585,6 +589,60 @@ def to_tensor(x):
         return [_t(i) for i in x]
     return _t(x)
 
+def num_images(images_path):
+    return len(get_image_files(images_path))
+
+def augment_imgs(images_path, final_count=100):
+    '''
+    Function for incresing the number of images in a folder using augmentation.
+    '''
+    imgs = get_image_files(images_path)
+    add = max(0,final_count-len(imgs))
+    new = 0
+    while 1:
+        if new >= add:
+            break
+        for i in imgs:
+            if '_aug_' not in i.name:
+                if new >= add:
+                    break
+                img = rgb_read(i)
+                h,w = img.shape[:2]
+                t = dai_tfms(h,w, test_tfms=False, tensorfy=False, color=False, distort=False)
+                aug = apply_tfms(img, t)
+                name = str(i.parent/(i.stem+f'_aug_{new}'+i.suffix))
+                plt.imsave(name, aug)
+                new += 1
+            
+def remove_augmented(images_path, remove=None):
+    '''
+    Function for removing augmented images from a folder.
+    '''
+    imgs = get_image_files(images_path)
+    if remove is None:
+        remove = len(imgs)
+    removed = 0
+    for i in imgs:
+        if removed >= remove:
+            break
+        if '_aug_' in i.name:
+            os.remove(i)
+            removed+=1
+
+def remove_images(images_path, final_count=0, fn=lambda x:True):
+    '''
+    Function for removing images from a folder.
+    '''
+    imgs = get_image_files(images_path)
+    remove = max(0, len(imgs) - final_count)
+    removed = 0
+    for i in imgs:
+        if removed >= remove:
+            break
+        if fn(i):
+            os.remove(i)
+            removed+=1
+
 def batchify_dict(d):
     for k in d.keys():
         d[k].unsqueeze_(0)
@@ -686,32 +744,32 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
              tensorfy=True, img_mean=None, img_std=None, extra=[], color=True,
              distort=True, test_tfms=True):
 
-    color_tfms = [albu.HueSaturationValue(p=0.3)]
+    color_tfms = [albu.HueSaturationValue(p=0.3),
+                #   albu.OneOf([
+                        # albu.IAAAdditiveGaussianNoise(),
+                        # albu.GaussNoise(),
+                        # albu.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True)
+                    # ], p=0.2),
+                    albu.OneOf([
+                    albu.CLAHE(clip_limit=2),
+                    albu.IAASharpen(),
+                    albu.IAAEmboss(),
+                    albu.RandomBrightnessContrast(),            
+                ], p=0.3)]
     distortion = [albu.OneOf([albu.OpticalDistortion(p=0.3),
                               albu.GridDistortion(p=.1),
                               albu.IAAPiecewiseAffine(p=0.3),],
                               p=0.2)]
+                # albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2)]
     extra += [
         albu.RandomRotate90(),
         albu.Flip(),
         albu.Transpose(),
         albu.OneOf([
-            albu.IAAAdditiveGaussianNoise(),
-            albu.GaussNoise(),
-            albu.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True)
-        ], p=0.2),
-        albu.OneOf([
             albu.MotionBlur(p=.2),
             albu.MedianBlur(blur_limit=3, p=0.1),
             albu.Blur(blur_limit=3, p=0.1),
-        ], p=0.2),
-        albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2),
-        albu.OneOf([
-            albu.CLAHE(clip_limit=2),
-            albu.IAASharpen(),
-            albu.IAAEmboss(),
-            albu.RandomBrightnessContrast(),            
-        ], p=0.3)
+        ], p=0.2)
     ]
     if not bbox and distort:
         extra += distortion
@@ -1402,14 +1460,22 @@ def get_files(path, extensions=None, recurse=True, folders=None, followlinks=Tru
         res = _get_files(path, f, extensions)
     return list(res)
 
-def get_image_files(path, recurse=True, folders=None, map_fn=None, sort_key=None):
+def get_image_files(path, recurse=True, folders=None, map_fn=None,
+                    sort_key=None, reverse=False, shuffle=False):
     "Get image files in `path` recursively, only in `folders`, if specified."
     l = get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
     if sort_key is not None:
         l = sorted(l, key=sort_key)
+    if reverse:
+        l = list(l)[::-1]
+    if shuffle:
+        random.shuffle(l)
     if map_fn is not None:
         return list_map(l, map_fn)
     return l
+
+def get_sorted_images(images_path, reverse=False):
+    return get_image_files(images_path, sort_key=last_modified, reverse=not reverse)
 
 def path_name(x):
     return Path(x).name

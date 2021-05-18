@@ -449,7 +449,9 @@ class DaiModel(nn.Module):
     def open_batch(self, data_batch, device=None):
         device = default_device(device)
         inputs = data_batch['x']
-        inputs = inputs.to(device)
+        if not is_list(inputs):
+            inputs = [inputs]
+        inputs = [x.to(device) for x in inputs]
         labels = None
         if 'label' in data_batch.keys():
             labels = data_batch['label']

@@ -1,6 +1,7 @@
 # Imports
 
 import torch
+import torchaudio
 import torchvision
 from torch import mm
 import torch.nn as nn

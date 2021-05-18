@@ -77,7 +77,8 @@ def denorm_img_general(inp, mean=None, std=None):
     inp = np.clip(inp, 0., 1.)
     return inp 
 
-def denorm_img(x, mean=None, std=None):
+def denorm_img_(x, mean=None, std=None):
+    
     if is_tensor(x):
         x = tensor_to_img(x)
     if mean is None:
@@ -90,6 +91,12 @@ def denorm_img(x, mean=None, std=None):
     x =  img_float_to_int(x)
     # x = np.clip(x, 0., 1.)
     return x 
+
+def denorm_img(x, mean=None, std=None):
+    if not is_list(x):
+        x = [x]
+    x = [denorm_img_(i, mean=mean, std=std) for i in x]
+    return x
 
 def img_on_bg(img, bg, x_factor=1/2, y_factor=1/2):
 
@@ -742,7 +749,7 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox
 
 def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
              tensorfy=True, img_mean=None, img_std=None, extra=[], color=True,
-             distort=True, test_tfms=True):
+             distort=True, blur=True, test_tfms=True):
 
     color_tfms = [albu.HueSaturationValue(p=0.3),
                 #   albu.OneOf([
@@ -761,16 +768,18 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
                               albu.IAAPiecewiseAffine(p=0.3),],
                               p=0.2)]
                 # albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2)]
-    extra += [
-        albu.RandomRotate90(),
-        albu.Flip(),
-        albu.Transpose(),
-        albu.OneOf([
+    blur = [albu.OneOf([
             albu.MotionBlur(p=.2),
             albu.MedianBlur(blur_limit=3, p=0.1),
             albu.Blur(blur_limit=3, p=0.1),
-        ], p=0.2)
+        ], p=0.2)]
+    extra += [
+        albu.RandomRotate90(),
+        albu.Flip(),
+        albu.Transpose()
     ]
+    if blur:
+        extra+=blur
     if not bbox and distort:
         extra += distortion
     if color:
@@ -1205,7 +1214,8 @@ def add_text_pil(img, text=['DreamAI'], x=None, y=None, font='verdana', font_siz
 
 def text_size(txt, font='dejavu serif', font_size=10):
 
-    fnt = ImageFont.truetype(get_font(font), font_size)
+    # fnt = ImageFont.truetype(get_font(font), font_size)
+    fnt = ImageFont.truetype(font, font_size)
     s = np.array((0,0))
     if not list_or_tuple(txt):
         txt = [txt]
@@ -1479,6 +1489,9 @@ def get_sorted_images(images_path, reverse=False):
 
 def path_name(x):
     return Path(x).name
+
+def path_stem(x):
+    return Path(x).stem
 
 def last_modified(x):
     return x.stat().st_ctime

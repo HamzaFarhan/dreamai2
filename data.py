@@ -1415,7 +1415,10 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
         except:
             print(f'Batch: {i+1}/{batches}')
         # images = data_batch[0]
-        images = data_batch['x'].to(device)
+        if is_list(data_batch['x']):
+            images = data_batch['x'][0].to(device)
+        else:
+            images = data_batch['x'].to(device)
         batch_samples = images.size(0) 
         images = images.view(batch_samples, images.size(1), -1)
         mean += images.mean(2).sum(0)
@@ -1430,7 +1433,10 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
         except:
             print(f'Batch: {i+1}/{batches}')
         # images = data_batch[0]
-        images = data_batch['x'].to(device)
+        if is_list(data_batch['x']):
+            images = data_batch['x'][0].to(device)
+        else:
+            images = data_batch['x'].to(device)
         batch_samples = images.size(0)
         images = images.view(batch_samples, images.size(1), -1)
         var += ((images - mean.unsqueeze(1))**2).sum([0,2])

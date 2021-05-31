@@ -12,6 +12,9 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
+def get_hw(img):
+    return np.array(img).shape[:2]
+
 def int_(x):
     return int(np.round(x))
 
@@ -483,6 +486,9 @@ def is_str(x):
 def is_int(x):
     return isinstance(x, int)    
 
+def is_float(x):
+    return isinstance(x, float)
+
 def is_array(x):
     return isinstance(x, np.ndarray)
 
@@ -794,8 +800,8 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
     if bbox:
         tfms1.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
         tfms2.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
-    tfms1 = albu.Compose(*tfms1)
-    tfms2 = albu.Compose(*tfms2)
+    tfms1 = albu.Compose(*tfms1, additional_targets={'image2': 'image', 'image3': 'image'})
+    tfms2 = albu.Compose(*tfms2, additional_targets={'image2': 'image', 'image3': 'image'})
     if test_tfms:
         return tfms1, tfms2
     return tfms1

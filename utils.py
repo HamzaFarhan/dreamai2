@@ -12,6 +12,9 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
 
+def get_hw(img):
+    return np.array(img).shape[:2]
+
 def int_(x):
     return int(np.round(x))
 
@@ -77,7 +80,8 @@ def denorm_img_general(inp, mean=None, std=None):
     inp = np.clip(inp, 0., 1.)
     return inp 
 
-def denorm_img(x, mean=None, std=None):
+def denorm_img_(x, mean=None, std=None):
+    
     if is_tensor(x):
         x = tensor_to_img(x)
     if mean is None:
@@ -90,6 +94,12 @@ def denorm_img(x, mean=None, std=None):
     x =  img_float_to_int(x)
     # x = np.clip(x, 0., 1.)
     return x 
+
+def denorm_img(x, mean=None, std=None):
+    if not is_list(x):
+        x = [x]
+    x = [denorm_img_(i, mean=mean, std=std) for i in x]
+    return x
 
 def img_on_bg(img, bg, x_factor=1/2, y_factor=1/2):
 
@@ -119,6 +129,9 @@ def gray2rgb(img):
 def rgb2gray(img):
     return cv2.cvtColor(img,cv2.COLOR_RGB2GRAY)
 
+def rgb2rgba(img):
+    return cv2.cvtColor(img,cv2.COLOR_RGB2RGBA)
+
 def bgra2rgb(img):
     if len(img.shape) > 2 and img.shape[2] == 4:
         return cv2.cvtColor(img,cv2.COLOR_BGRA2RGB)
@@ -133,10 +146,13 @@ def img_float_to_int(img):
 def img_int_to_float(img):
     return np.clip((np.array(img)/255).astype(np.float),0.,1.)
 
-def rgb_read(img):
+def rgb_read(img, shape=None):
     if not path_or_str(img):
         return img
-    return bgr2rgb(cv2.imread(str(img)))
+    img = bgr2rgb(cv2.imread(str(img)))
+    if shape is not None:
+        img = cv2.resize(img, (shape[1], shape[0]))
+    return img
 
 def c1_read(img):
     return cv2.imread(str(img), 0)
@@ -304,7 +320,11 @@ def slice_df(df, cols):
     return pd.concat(dfs, axis=1)
 
 def dai_one_hot(labels, class_names):
-    return [(np.in1d(list(class_names), l)*1.) for l in labels]
+    hot = [(np.in1d(list(class_names), l)*1.) for l in labels]
+    for i,h in enumerate(hot):
+        if len(h) == 0:
+            hot[i] = np.array([0.]*len(class_names))
+    return hot
 
 def get_one_hot(df):
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
@@ -466,6 +486,9 @@ def is_str(x):
 def is_int(x):
     return isinstance(x, int)    
 
+def is_float(x):
+    return isinstance(x, float)
+
 def is_array(x):
     return isinstance(x, np.ndarray)
 
@@ -579,6 +602,60 @@ def to_tensor(x):
         return [_t(i) for i in x]
     return _t(x)
 
+def num_images(images_path):
+    return len(get_image_files(images_path))
+
+def augment_imgs(images_path, final_count=100):
+    '''
+    Function for incresing the number of images in a folder using augmentation.
+    '''
+    imgs = get_image_files(images_path)
+    add = max(0,final_count-len(imgs))
+    new = 0
+    while 1:
+        if new >= add:
+            break
+        for i in imgs:
+            if '_aug_' not in i.name:
+                if new >= add:
+                    break
+                img = rgb_read(i)
+                h,w = img.shape[:2]
+                t = dai_tfms(h,w, test_tfms=False, tensorfy=False, color=False, distort=False)
+                aug = apply_tfms(img, t)
+                name = str(i.parent/(i.stem+f'_aug_{new}'+i.suffix))
+                plt.imsave(name, aug)
+                new += 1
+            
+def remove_augmented(images_path, remove=None):
+    '''
+    Function for removing augmented images from a folder.
+    '''
+    imgs = get_image_files(images_path)
+    if remove is None:
+        remove = len(imgs)
+    removed = 0
+    for i in imgs:
+        if removed >= remove:
+            break
+        if '_aug_' in i.name:
+            os.remove(i)
+            removed+=1
+
+def remove_images(images_path, final_count=0, fn=lambda x:True):
+    '''
+    Function for removing images from a folder.
+    '''
+    imgs = get_image_files(images_path)
+    remove = max(0, len(imgs) - final_count)
+    removed = 0
+    for i in imgs:
+        if removed >= remove:
+            break
+        if fn(i):
+            os.remove(i)
+            removed+=1
+
 def batchify_dict(d):
     for k in d.keys():
         d[k].unsqueeze_(0)
@@ -677,36 +754,39 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox
     return tfms1
 
 def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=False,
-             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True, test_tfms=True):
+             tensorfy=True, img_mean=None, img_std=None, extra=[], color=True,
+             distort=True, blur=True, test_tfms=True):
 
-    color_tfms = [albu.HueSaturationValue(p=0.3)]
+    color_tfms = [albu.HueSaturationValue(p=0.3),
+                #   albu.OneOf([
+                        # albu.IAAAdditiveGaussianNoise(),
+                        # albu.GaussNoise(),
+                        # albu.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True)
+                    # ], p=0.2),
+                    albu.OneOf([
+                    albu.CLAHE(clip_limit=2),
+                    albu.IAASharpen(),
+                    albu.IAAEmboss(),
+                    albu.RandomBrightnessContrast(),            
+                ], p=0.3)]
     distortion = [albu.OneOf([albu.OpticalDistortion(p=0.3),
                               albu.GridDistortion(p=.1),
                               albu.IAAPiecewiseAffine(p=0.3),],
                               p=0.2)]
-    extra += [
-        albu.RandomRotate90(),
-        albu.Flip(),
-        albu.Transpose(),
-        albu.OneOf([
-            albu.IAAAdditiveGaussianNoise(),
-            albu.GaussNoise(),
-            albu.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True)
-        ], p=0.2),
-        albu.OneOf([
+                # albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2)]
+    blur = [albu.OneOf([
             albu.MotionBlur(p=.2),
             albu.MedianBlur(blur_limit=3, p=0.1),
             albu.Blur(blur_limit=3, p=0.1),
-        ], p=0.2),
-        albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=45, p=0.2),
-        albu.OneOf([
-            albu.CLAHE(clip_limit=2),
-            albu.IAASharpen(),
-            albu.IAAEmboss(),
-            albu.RandomBrightnessContrast(),            
-        ], p=0.3)
+        ], p=0.2)]
+    extra += [
+        albu.RandomRotate90(),
+        albu.Flip(),
+        albu.Transpose()
     ]
-    if not bbox:
+    if blur:
+        extra+=blur
+    if not bbox and distort:
         extra += distortion
     if color:
         extra += color_tfms
@@ -720,8 +800,8 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
     if bbox:
         tfms1.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
         tfms2.append(albu.BboxParams(format='pascal_voc', label_fields=['category_ids'], min_visibility=0))
-    tfms1 = albu.Compose(*tfms1)
-    tfms2 = albu.Compose(*tfms2)
+    tfms1 = albu.Compose(*tfms1, additional_targets={'image2': 'image', 'image3': 'image'})
+    tfms2 = albu.Compose(*tfms2, additional_targets={'image2': 'image', 'image3': 'image'})
     if test_tfms:
         return tfms1, tfms2
     return tfms1
@@ -1140,7 +1220,8 @@ def add_text_pil(img, text=['DreamAI'], x=None, y=None, font='verdana', font_siz
 
 def text_size(txt, font='dejavu serif', font_size=10):
 
-    fnt = ImageFont.truetype(get_font(font), font_size)
+    # fnt = ImageFont.truetype(get_font(font), font_size)
+    fnt = ImageFont.truetype(font, font_size)
     s = np.array((0,0))
     if not list_or_tuple(txt):
         txt = [txt]
@@ -1214,71 +1295,71 @@ def wrap_text(img, text, x=None, y=None, font_size=None, font='dejavu serif'):
         text_x = x
     return final_text, fnt, text_x, text_y
 
-def add_text_pil_2(img, text='DreamAI', x=None, y=None, font='dejavu serif', font_size=None,
-                   color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
+# def add_text_pil_2(img, text='DreamAI', x=None, y=None, font='dejavu serif', font_size=None,
+#                    color='white', stroke_width=0, stroke_fill='blue', align='center', bg=None):
 
-    y_dict = {'top':img.size[1]*(1/50), 'middle':None, 'bottom':img.size[1]*(8/9)}
-    # x_dict = {'left':img.size[0]*(1/50), 'middle':None, 'right':img.size[1]*(8/9)}
+#     y_dict = {'top':img.size[1]*(1/50), 'middle':None, 'bottom':img.size[1]*(8/9)}
+#     # x_dict = {'left':img.size[0]*(1/50), 'middle':None, 'right':img.size[1]*(8/9)}
 
-    if is_str(y):
-        y = y_dict[y]
+#     if is_str(y):
+#         y = y_dict[y]
 
-    if is_list(text):
-        text = ' '.join(text)
-    if x is not None: x = int(x)
-    if y is not None: y = int(y)
-    if is_str(img):
-        img = Image.open(img)
-    elif isinstance(img, Path):
-        img = Image.open(str(img))
-    elif isinstance(img, np.ndarray):
-        img = Image.fromarray(img)
-    text, fnt, text_x, text_y = wrap_text(img, text, x=x, y=y, font_size=font_size, font=font) 
-    # print(text)
-    d = ImageDraw.Draw(img)
-    text_size = d.multiline_textsize(text, font=fnt)
-    if color is None:
-        size_w, size_h = text_size
-        bg = np.array(img.convert('RGB'))[text_y:size_h+text_y, text_x:size_w+text_x]
-        # plt_show(bg)
-        rgb_mean = np.mean(k_dominant_colors(bg, 2),axis=0)
-        color_mean = np.mean(rgb_mean)
+#     if is_list(text):
+#         text = ' '.join(text)
+#     if x is not None: x = int(x)
+#     if y is not None: y = int(y)
+#     if is_str(img):
+#         img = Image.open(img)
+#     elif isinstance(img, Path):
+#         img = Image.open(str(img))
+#     elif isinstance(img, np.ndarray):
+#         img = Image.fromarray(img)
+#     text, fnt, text_x, text_y = wrap_text(img, text, x=x, y=y, font_size=font_size, font=font) 
+#     # print(text)
+#     d = ImageDraw.Draw(img)
+#     text_size = d.multiline_textsize(text, font=fnt)
+#     if color is None:
+#         size_w, size_h = text_size
+#         bg = np.array(img.convert('RGB'))[text_y:size_h+text_y, text_x:size_w+text_x]
+#         # plt_show(bg)
+#         rgb_mean = np.mean(k_dominant_colors(bg, 2),axis=0)
+#         color_mean = np.mean(rgb_mean)
 
-        def get_target_color_bg():
-            if color_mean > 155:
-                target_color = 55
-            elif color_mean < 125:
-                target_color = 255
-            else:
-                # print(color_mean)
-                rb = random.randint(200,255)
-                gb = random.randint(200,255)
-                bb = random.randint(200,255)
-                background_color = (rb,gb,bb)
-                bx = text_x-5
-                by = text_y-5
-                d.rectangle(((bx,by),(bx+size_w+5, by+size_h+5)), fill=background_color)
-                target_color = 55
-            return target_color
+#         def get_target_color_bg():
+#             if color_mean > 155:
+#                 target_color = 55
+#             elif color_mean < 125:
+#                 target_color = 255
+#             else:
+#                 # print(color_mean)
+#                 rb = random.randint(200,255)
+#                 gb = random.randint(200,255)
+#                 bb = random.randint(200,255)
+#                 background_color = (rb,gb,bb)
+#                 bx = text_x-5
+#                 by = text_y-5
+#                 d.rectangle(((bx,by),(bx+size_w+5, by+size_h+5)), fill=background_color)
+#                 target_color = 55
+#             return target_color
 
-        def get_target_color():
-            if color_mean > 150:
-                target_color = 55
-            else:
-                target_color = 255
-            return target_color
+#         def get_target_color():
+#             if color_mean > 150:
+#                 target_color = 55
+#             else:
+#                 target_color = 255
+#             return target_color
         
-        target_color = get_target_color()
-        # target_color = get_target_color()
+#         target_color = get_target_color()
+#         # target_color = get_target_color()
 
-        r = random.randint(target_color-55, target_color)
-        g = random.randint(target_color-55, target_color)
-        b = random.randint(target_color-55, target_color)
-        color = (r,g,b)
-    d.multiline_text((text_x, text_y), text, fill=color, font=fnt, align=align,
-                     stroke_width=stroke_width, stroke_fill=stroke_fill)
-    img = np.array(img)
-    return img
+#         r = random.randint(target_color-55, target_color)
+#         g = random.randint(target_color-55, target_color)
+#         b = random.randint(target_color-55, target_color)
+#         color = (r,g,b)
+#     d.multiline_text((text_x, text_y), text, fill=color, font=fnt, align=align,
+#                      stroke_width=stroke_width, stroke_fill=stroke_fill)
+#     img = np.array(img)
+#     return img
 
 def remove_from_list(l, r):
     for x in r:
@@ -1294,18 +1375,28 @@ def max_n(l, n=3):
     idx = heapq.nlargest(n, range(len(a)), a.take)
     return idx, a[idx]
 
-def k_dominant_colors(img, k):
+# def k_dominant_colors(img, k):
 
-    img = img.reshape((img.shape[0] * img.shape[1], 3))
-    clt = KMeans(n_clusters = k)
-    clt.fit(img)
-    return clt.cluster_centers_
+#     img = img.reshape((img.shape[0] * img.shape[1], 3))
+#     clt = KMeans(n_clusters = k)
+#     clt.fit(img)
+#     return clt.cluster_centers_
 
-def solid_color_img(shape=(300,300,3), color='black'):
+def solid_color_img(shape=(300,300,3), color='black', alpha=None):
     image = np.zeros(shape, np.uint8)
     color = color_to_rgb(color)
     image[:] = color
+    if alpha is not None:
+        image = Image.fromarray(image)
+        image.putalpha(alpha)
+        image = np.array(image)
     return image
+
+# def solid_color_img(shape=(300,300,3), color='black'):
+#     image = np.zeros(shape, np.uint8)
+#     color = color_to_rgb(color)
+#     image[:] = color
+#     return image
 
 def color_to_rgb(color):
     if type(color) == str:
@@ -1385,17 +1476,28 @@ def get_files(path, extensions=None, recurse=True, folders=None, followlinks=Tru
         res = _get_files(path, f, extensions)
     return list(res)
 
-def get_image_files(path, recurse=True, folders=None, map_fn=None, sort_key=None):
+def get_image_files(path, recurse=True, folders=None, map_fn=None,
+                    sort_key=None, reverse=False, shuffle=False):
     "Get image files in `path` recursively, only in `folders`, if specified."
     l = get_files(path, extensions=image_extensions, recurse=recurse, folders=folders)
     if sort_key is not None:
         l = sorted(l, key=sort_key)
+    if reverse:
+        l = list(l)[::-1]
+    if shuffle:
+        random.shuffle(l)
     if map_fn is not None:
         return list_map(l, map_fn)
     return l
 
+def get_sorted_images(images_path, reverse=False):
+    return get_image_files(images_path, sort_key=last_modified, reverse=not reverse)
+
 def path_name(x):
     return Path(x).name
+
+def path_stem(x):
+    return Path(x).stem
 
 def last_modified(x):
     return x.stat().st_ctime

@@ -26,18 +26,18 @@ class DaiDataset(Dataset):
             img_name = self.data.iloc[index, 0]
         except:
             img_name = self.data[index, 0]
-        return img_name
+        return [img_name]
 
     def get_img_path(self, index):
-        return os.path.join(self.data_dir, self.get_name(index))
+        return [os.path.join(self.data_dir, x) for x in self.get_name(index)]
 
     def get_img(self, index):
         img_path = self.get_img_path(index)
         try:
             if self.channels == 3:
-                img = rgb_read(img_path)
+                img = [rgb_read(x) for x in img_path]
             else:    
-                img = c1_read(img_path)
+                img = [c1_read(x) for x in img_path]
             return img
         except:
             print(img_path)
@@ -65,47 +65,14 @@ class DaiDataset(Dataset):
     def get_x(self, to_tensor=True, **kwargs):
         img = kwargs['img']
         if self.tfms is not None:
-            x = apply_tfms(img.copy(), self.tfms)
+            x = [apply_tfms(i.copy(), self.tfms) for i in img]
             if self.channels == 1:
-                x = x.unsqueeze(0)
+                x = [i.unsqueeze(0) for i in x]
             if not to_tensor:
-                x = tensor_to_img(x)
+                x = [tensor_to_img(i) for i in x]
         else:
             x = img
         return x
-
-    def get_ss(self, to_tensor=True):
-
-        index2 = random.choice(range(len(self.data)))
-        try:
-            img_path2 = os.path.join(self.data_dir, self.data.iloc[index2, 0])
-        except:
-            img_path2 = os.path.join(self.data_dir, self.data[index2, 0])
-        # img_path2 = str(img_path2)
-        if self.channels == 3:
-            img2 = rgb_read(img_path2)
-        else:    
-            img2 = c1_read(img_path2)
-        x2 = apply_tfms(img2.copy(), self.ss_tfms)
-        if self.channels == 1:
-            x2 = x2.unsqueeze(0)
-        norm_t = get_norm(self.tfms)
-        if norm_t:
-            mean = norm_t.mean
-            std = norm_t.std
-        else:
-            std = None
-            mean = None
-        resize_t = list(self.tfms)[0]
-        h,w = resize_t.height, resize_t.width
-        img2_tfms = instant_tfms(h, w, img_mean=mean, img_std=std)[0]
-        img2 = apply_tfms(img2, img2_tfms)
-        if self.channels == 1:
-            img2 = img2.unsqueeze(0)
-        if not to_tensor:
-            x2 = tensor_to_img(x2)
-            img2 = tensor_to_img(img2)
-        return x2,img2
 
     def get_meta(self, index):
         if not list_or_tuple(self.meta_idx):
@@ -133,10 +100,12 @@ class DaiDataset(Dataset):
         if self.do_tta:
             return self.get_tta(**locals_to_params(locals()))
         x = self.get_x(**locals_to_params(locals()))
+        if is_list(x) and len(x) == 0:
+            x = x[0]
         ret = self.get_ret(**locals_to_params(locals()))
 
-        if self.ss_tfms is not None:
-            ret['x2'], ret['ss_img'] = self.get_ss(to_tensor=to_tensor)
+        # if self.ss_tfms is not None:
+            # ret['x2'], ret['ss_img'] = self.get_ss(to_tensor=to_tensor)
 
         if self.meta_idx is not None:
             ret['meta'] = self.get_meta(index=index)
@@ -180,13 +149,14 @@ class DaiDataset(Dataset):
         data = self.__getitem__(index, to_tensor=to_tensor, str_to_index=False)
         if denorm:
             self.denorm_data(data=data)
+        if is_list(data['x']):
+            data['x'] = np.concatenate(data['x'], axis=1)
         ret = data
         if show:
             self.show_data(data=data)
-
         return ret
 
-def init_vis(dset, data_dir):
+def init_vis(dset, data_dir=''):
     original_set = DaiDataset(data=dset.data, data_dir=data_dir)
     b1 = original_set.get_at_index(0)
     print(f"Shape: {b1['x'].shape}")
@@ -849,8 +819,10 @@ class PredDataset(Dataset):
                 img = rgb_read(img_path)
             else:    
                 img = c1_read(img_path)
+            name = img_path
         except:
             img = self.data.iloc[index,0]
+            name = 'img_0'
 
         if self.do_tta:
             if self.tta is None:
@@ -865,7 +837,7 @@ class PredDataset(Dataset):
                 x = x.unsqueeze(0)
         else:
             x = img
-        ret = {}
+        ret = {'name':name}
         ret['x'] = x
         if self.meta_idx is not None:
             if not list_or_tuple(self.meta_idx):
@@ -1443,7 +1415,10 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
         except:
             print(f'Batch: {i+1}/{batches}')
         # images = data_batch[0]
-        images = data_batch['x'].to(device)
+        if is_list(data_batch['x']):
+            images = data_batch['x'][0].to(device)
+        else:
+            images = data_batch['x'].to(device)
         batch_samples = images.size(0) 
         images = images.view(batch_samples, images.size(1), -1)
         mean += images.mean(2).sum(0)
@@ -1458,7 +1433,10 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
         except:
             print(f'Batch: {i+1}/{batches}')
         # images = data_batch[0]
-        images = data_batch['x'].to(device)
+        if is_list(data_batch['x']):
+            images = data_batch['x'][0].to(device)
+        else:
+            images = data_batch['x'].to(device)
         batch_samples = images.size(0)
         images = images.view(batch_samples, images.size(1), -1)
         var += ((images - mean.unsqueeze(1))**2).sum([0,2])
@@ -1476,24 +1454,24 @@ def folders_to_dfs(images_path='', train_name=None, valid_name=None, test_name=N
 
     if train_name is not None:    
         imgs = get_image_files(Path(images_path)/train_name, folders=folders)
-        labels = list_map(imgs, label_fn)    
-        if not full_path:
-            imgs = [end_of_path(x) for x in imgs]
-        if do_str:
-            imgs = list_map(imgs, str)
-        train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
-        if shuffle:
-            train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
+        # labels = list_map(imgs, label_fn)    
+        # if not full_path:
+        #     imgs = [end_of_path(x) for x in imgs]
+        # if do_str:
+        #     imgs = list_map(imgs, str)
+        # train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
+        # if shuffle:
+        #     train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
     else:
         imgs = get_image_files(images_path, folders=folders)
-        labels = list_map(imgs, label_fn)    
-        if not full_path:
-            imgs = [end_of_path(x) for x in imgs]
-        if do_str:
-            imgs = list_map(imgs, str)
-        train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
-        if shuffle:
-            train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
+    labels = list_map(imgs, label_fn)    
+    if not full_path:
+        imgs = [end_of_path(x) for x in imgs]
+    if do_str:
+        imgs = list_map(imgs, str)
+    train_df = pd.DataFrame({'img':imgs, 'label': labels}, columns=['img', 'label'])
+    if shuffle:
+        train_df = train_df.sample(frac=1., random_state=2).reset_index(drop=True)
     if valid_name is not None:
         imgs = get_image_files(Path(images_path)/valid_name, folders=folders)
         labels = list_map(imgs, label_fn)

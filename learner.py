@@ -70,9 +70,9 @@ class CheckpointCallback(Callback):
                 self.curr_best = 0.
         else:
             self.curr_best = curr_best
-        if save_name [-4:] != '.pth' or save_name [-4:] != '.pkl':
+        if Path(save_name).suffix not in ['.pkl','.pth','.pt']:
             save_name = save_name+'.pth'
-        if best_name [-4:] != '.pth' or best_name [-4:] != '.pkl':
+        if Path(best_name).suffix not in ['.pkl','.pth','.pt']:
             best_name = best_name+'.pth'
         # checkpoint_folder = 'dai_model_checkpoints'
         os.makedirs(checkpoint_folder, exist_ok=True)
@@ -133,6 +133,7 @@ class CheckpointCallback(Callback):
             self.not_improved += 1
             if self.not_improved >= self.early_stopping_epochs:
                 self.learner.do_training = False
+                self.learner.load_best = True
                 print('+----------------------------------------------------------------------+')
                 print(' Early Stopping.')
                 print('+----------------------------------------------------------------------+')
@@ -937,7 +938,7 @@ class Learner:
     def fine_tune(self, epochs=[12,30], frozen_lr=None, unfrozen_lr=None, metric='loss', save_every=None, save_best=True,
                   load_best_frozen=False, semi_sup=False, early_stopping_epochs=None, pred_thresh=None, class_weights=None,
                   print_every=3, validate_every=1, load_best_unfrozen=True, cycle_len=0, save_class=None, print_progress=True,
-                  progressive_resizing=None, extra_loss_func=None, verbose=True, fit_scheduler=None, num_progress_classes=10):
+                  progressive_resizing=None, extra_loss_func=None, verbose=False, fit_scheduler=None, num_progress_classes=10):
 
         def frozen_fit(epochs, c_len, early_stopping_epochs=None):
             print(f'+{"-"*10}+')

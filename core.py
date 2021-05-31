@@ -27,6 +27,7 @@ models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
                resnext50_32x4d: {'cut': -2, 'conv_channels': 2048},
                resnext101_32x8d: {'cut': -2, 'conv_channels': 2048},
                densenet121: {'cut': -1, 'conv_channels': 1024},
+               densenet169: {'cut': -1, 'conv_channels': 1664},
                efficientnet_b0: {'cut': -5, 'conv_channels': 1280},
                efficientnet_b2: {'cut': -5, 'conv_channels': 1408},
                efficientnet_b4: {'cut': -5, 'conv_channels': 1792},
@@ -403,11 +404,19 @@ class DaiModel(nn.Module):
         if checkpoint:
             self.load_checkpoint(checkpoint, load_opt=load_opt, load_crit=load_crit, load_misc=load_misc)
     
+    def forward_(self, x):
+        if not is_list(x):
+            x = [x]
+        x = [self.model[0](i) for i in x]
+        x = torch.cat(x, dim=1)
+        return x
+
     def forward(self, x, meta=None):
+        x = self.forward_(x)
         if meta is None:
-            return self.model(x)
+            return self.model[1](x)
         # ftrs = torch.cat([flatten_tensor(self.model[0](x)), meta], dim=1)
-        return self.model[1](self.model[0](x), meta=meta)
+        return self.model[1](x, meta=meta)
     
     def compute_loss(self, outputs, labels, class_weights=None, extra_loss_func=None, **kwargs):
 
@@ -448,7 +457,10 @@ class DaiModel(nn.Module):
     def open_batch(self, data_batch, device=None):
         device = default_device(device)
         inputs = data_batch['x']
-        inputs = inputs.to(device)
+        if is_list(inputs):       
+            inputs = [x.to(device) for x in inputs]
+        else:
+            inputs = inputs.to(device)
         labels = None
         if 'label' in data_batch.keys():
             labels = data_batch['label']
@@ -463,7 +475,6 @@ class DaiModel(nn.Module):
 
     def process_batch(self, data_batch, device=None):
         device = default_device(device)
-
         inputs, labels, meta = dict_values(self.open_batch(data_batch, device))
 
         # inputs = data_batch['x']

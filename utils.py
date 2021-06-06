@@ -421,6 +421,15 @@ def remove_key(d, fn):
         if fn(k):
             del d[k]
 
+def split_array(start, stop, steps, step=1):
+    if start == stop:
+        return [start]*steps
+    if stop < start:
+        step = -step
+    chunks = np.array_split(np.arange(start,stop,step), steps)
+    # print(chunks)
+    return [list(x)[-1] for x in chunks]
+
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
     if checkpoint is None: return None
     model_sd = copy.deepcopy(checkpoint)

@@ -4,11 +4,12 @@ from .dai_imports import *
 class DaiDataset(Dataset):
     
     def __init__(self, data, data_dir='', tfms=None, ss_tfms=None, channels=3,
-                 meta_idx=None, do_tta=False, tta=None, num_tta=3,  **kwargs):
+                 meta_idx=None, do_tta=False, tta=None, num_tta=3, img_idx=0, label_idx=1,
+                   **kwargs):
         super(DaiDataset, self).__init__()
         if is_df(data) and len(data.columns) == 1:
             data['extra_col'] = 'extra'
-        store_attr(self,'data,tfms,ss_tfms,meta_idx,do_tta,tta,num_tta,channels')
+        store_attr(self,'data,tfms,ss_tfms,meta_idx,do_tta,tta,num_tta,channels,img_idx,label_idx')
         self.tfms_list = []
         self.data_dir = str(data_dir)
         if self.tfms is not None:
@@ -23,9 +24,9 @@ class DaiDataset(Dataset):
     
     def get_name(self, index):
         try:
-            img_name = self.data.iloc[index, 0]
+            img_name = self.data.iloc[index, self.img_idx]
         except:
-            img_name = self.data[index, 0]
+            img_name = self.data[index, self.img_idx]
         return [img_name]
 
     def get_img_path(self, index):
@@ -33,6 +34,7 @@ class DaiDataset(Dataset):
 
     def get_img(self, index):
         img_path = self.get_img_path(index)
+        # print(f'lala {img_path}')
         try:
             if self.channels == 3:
                 img = [rgb_read(x) for x in img_path]
@@ -44,9 +46,10 @@ class DaiDataset(Dataset):
     
     def get_y(self, index, str_to_index=True):
         try:
-            y = self.data.iloc[index, 1]
+            y = self.data.iloc[index, self.label_idx]
         except:
-            y = self.data[index, 1]
+            y = self.data[index, self.label_idx]
+        # print(f'ooolala {y}')
         y2 = self.get_show_label(y, index)                 
         if str_to_index:
             if is_str(y) and hasattr(self, 'class_names'):
@@ -139,7 +142,7 @@ class DaiDataset(Dataset):
 
     def get_show_label(self, y, index):
         if not is_str(y) and (is_iterable(y) or is_tensor(y)):
-            label = self.data.iloc[index, 2]
+            label = self.data.iloc[index, self.label_idx+1]
         else:
             label = y
         return label
@@ -156,7 +159,7 @@ class DaiDataset(Dataset):
             self.show_data(data=data)
         return ret
 
-def init_vis(dset, data_dir=''):
+def init_vis(dset, data_dir='', img_idx=0, label_idx=1):
     original_set = DaiDataset(data=dset.data, data_dir=data_dir)
     b1 = original_set.get_at_index(0)
     print(f"Shape: {b1['x'].shape}")
@@ -1394,7 +1397,8 @@ def get_class_weights(df):
         w = list(df.iloc[:,1].value_counts(normalize=True).sort_index())    
     return 1-tensor(w)
 
-def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32, device=None):
+def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32, device=None,
+                   img_idx=0, label_idx=1):
     
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -1402,7 +1406,7 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
     print('Calculating dataset mean and std. This may take a while.\n')
     frac_data = df.copy().sample(frac=stats_percentage).reset_index(drop=True).copy()
     tfms = instant_tfms(image_size, image_size)[1]
-    dset = DaiDataset(frac_data, data_dir=data_dir, tfms=tfms)
+    dset = DaiDataset(frac_data, data_dir=data_dir, tfms=tfms, img_idx=img_idx, label_idx=label_idx)
     dl = DataLoader(dset, batch_size=bs, num_workers=4)
     batches = len(dl)
     # print('.', end='')

@@ -10,7 +10,7 @@ image_extensions = {'.art','.bmp','.cdr','.cdt','.cpt','.cr2','.crw','.djv','.dj
 
 # DEFAULTS = {'image_extensions': image_extensions}
 
-imagenet_stats = (tensor([0.485, 0.456, 0.406]), tensor([0.229, 0.224, 0.225]))
+imagenet_stats = (torch.tensor([0.485, 0.456, 0.406]), torch.tensor([0.229, 0.224, 0.225]))
 
 def get_hw(img):
     return np.array(img).shape[:2]
@@ -601,7 +601,7 @@ def has_norm(tfms):
     return False
 
 def to_tensor(x):
-    t = AT.ToTensor()
+    t = AT.ToTensorV2()
     def _t(x):
         if is_tensor(x):
             return x
@@ -749,7 +749,7 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
-        t = AT.ToTensor()
+        t = AT.ToTensorV2()
 
     tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
     tfms2 = [[test_resize(height=h, width=w), normalize, t]]
@@ -803,7 +803,7 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
-        t = AT.ToTensor()
+        t = AT.ToTensorV2()
     tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
     tfms2 = [[test_resize(height=h, width=w), normalize, t]]
     if bbox:
@@ -831,7 +831,7 @@ def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resiz
     if img_mean is not None:
         normalize = transforms.Normalize(img_mean, img_std)
     if tensorfy:
-        t = transforms.ToTensor()
+        t = transforms.ToTensorV2()
     tfms1 = [resize((h,w)), t, normalize]
     tfms2 = [test_resize((h,w)), t, normalize]
     tfms1 = transforms.Compose(tfms1)
@@ -862,7 +862,7 @@ def imgs_to_batch(paths=[], imgs=[], bs=1, size=None, norm=False, img_mean=None,
         data = pd.DataFrame({'Images':paths})
     elif len(imgs) > 0:
         data = pd.DataFrame({'Images':imgs})
-    tfms = [AT.ToTensor()]
+    tfms = [AT.ToTensorV2()]
     if norm:
         if img_mean is None:
             norm_tfms = albu.Compose(tfms)
@@ -888,7 +888,7 @@ def imgs_to_batch(paths=[], imgs=[], bs=1, size=None, norm=False, img_mean=None,
 
 # def imgs_to_batch_old(paths = [],imgs = [], size = None, smaller_factor = None, enlarge_factor = None, mean = None, std = None,
 #                   stats_percentage = 1.,show = False, norm = False, bgr_to_rgb = False, device = None, channels = 3):
-#     tfms = [AT.ToTensor()]    
+#     tfms = [AT.ToTensorV2()]    
 #     if len(paths) > 0:
 #         if channels == 3:
 #             bgr_to_rgb = True
@@ -964,7 +964,7 @@ def mini_batch(dataset,bs,start=0):
     for i in range(start,bs+start):
         b = dataset[i]
         imgs[i-start] = b[0]
-        labels[i-start] = tensor(b[1])
+        labels[i-start] = torch.tensor(b[1])
     return imgs,labels
 
 def pad_list(x, n):

@@ -6,7 +6,7 @@ import torchvision
 from torch import mm
 import torch.nn as nn
 import torch.optim as optim
-import torch.tensor as tensor
+# import torch.tensor as tensor
 from torchvision.ops import nms
 import torch.nn.functional as F
 from torch.utils.data import Dataset

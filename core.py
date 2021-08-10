@@ -85,9 +85,17 @@ class MultiHeadModel(nn.Module):
 
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
                 bn_final=False, lin_first=False, y_range=None, actv=None,
-                relu_fn=nn.ReLU(inplace=True)):
+                relu_fn=nn.ReLU(inplace=True), trial=None):
     "Model head that takes `nf` features, runs through `lin_ftrs`, and out `n_out` classes."
-    lin_ftrs = [nf, 512, n_out] if lin_ftrs is None else [nf] + lin_ftrs + [n_out]
+    if trial is not None:
+        lin_ftrs = [nf]
+        num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 1, 3)
+        for _ in range(num_lin_ftrs):
+            n_lin_ftrs = trial.suggest_categorical("n_lin_ftrs", [256,512,1024])
+            lin_ftrs.append(n_lin_ftrs)
+        lin_ftrs.append(n_out)
+    else:
+        lin_ftrs = [nf, 512, n_out] if lin_ftrs is None else [nf] + lin_ftrs + [n_out]
     ps = [ps]
     if len(ps) == 1: ps = [ps[0]/2] * (len(lin_ftrs)-2) + ps
     actns = [relu_fn] * (len(lin_ftrs)-2) + [None]
@@ -106,7 +114,7 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
 
 def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
                  relu_fn=nn.ReLU(inplace=True), actv=None, pretrained=True,
-                 only_body=False, state_dict=None, strict_load=True):
+                 only_body=False, state_dict=None, strict_load=True, trial=None):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
     if only_body:
@@ -114,10 +122,10 @@ def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
     if is_iterable(num_classes):
         heads = []
         for nc in num_classes:
-            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc, relu_fn=relu_fn, actv=actv)) 
+            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc, relu_fn=relu_fn, actv=actv, trial=trial)) 
         head = MultiHeadModel(nn.ModuleList(heads))
     else:
-        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes, relu_fn=relu_fn, actv=actv)
+        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes, relu_fn=relu_fn, actv=actv, trial=trial)
     net = nn.Sequential(body, head)
     load_state_dict(net, sd=state_dict, strict=strict_load)
     return net
@@ -549,9 +557,9 @@ class DaiModel(nn.Module):
 
     def update_accuracy(self, outputs, labels, classifier, metric, thresh=None):
         if thresh is None:
-            thresh = tensor(self.pred_thresh).to(self.device)
+            thresh = torch.tensor(self.pred_thresh).to(self.device)
         else:
-            thresh = tensor(thresh).to(self.device)
+            thresh = torch.as_tensor(thresh).to(self.device)
         if metric == 'accuracy':
             classifier.update_accuracies(outputs, labels)
             # try:

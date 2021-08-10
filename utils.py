@@ -601,7 +601,7 @@ def has_norm(tfms):
     return False
 
 def to_tensor(x):
-    t = AT.ToTensorV2()
+    t = AT.ToTensor()
     def _t(x):
         if is_tensor(x):
             return x
@@ -672,7 +672,12 @@ def batchify_dict(d):
 def store_attr(self, nms):
     "Store params named in comma-separated `nms` from calling context into attrs in `self`"
     mod = inspect.currentframe().f_back.f_locals
-    for n in re.split(', *', nms): setattr(self,n,mod[n])
+    for n in re.split(', *', nms):
+        try:
+            setattr(self,n,mod[n])
+        except:
+            setattr(self,n,mod['kwargs'][n])
+        
 
 def noop(x=None, *args, **kwargs):
     "Do nothing"
@@ -749,7 +754,7 @@ def instant_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
-        t = AT.ToTensorV2()
+        t = AT.ToTensor()
 
     tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
     tfms2 = [[test_resize(height=h, width=w), normalize, t]]
@@ -803,7 +808,7 @@ def dai_tfms(h=224, w=224, resize=albu.Resize, test_resize=albu.Resize, bbox=Fal
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
     if tensorfy:
-        t = AT.ToTensorV2()
+        t = AT.ToTensor()
     tfms1 = [[resize(height=h, width=w), *extra, normalize, t]]
     tfms2 = [[test_resize(height=h, width=w), normalize, t]]
     if bbox:
@@ -831,7 +836,7 @@ def rand_aug(h=224,w=224, resize=transforms.Resize, test_resize=transforms.Resiz
     if img_mean is not None:
         normalize = transforms.Normalize(img_mean, img_std)
     if tensorfy:
-        t = transforms.ToTensorV2()
+        t = transforms.ToTensor()
     tfms1 = [resize((h,w)), t, normalize]
     tfms2 = [test_resize((h,w)), t, normalize]
     tfms1 = transforms.Compose(tfms1)
@@ -862,7 +867,7 @@ def imgs_to_batch(paths=[], imgs=[], bs=1, size=None, norm=False, img_mean=None,
         data = pd.DataFrame({'Images':paths})
     elif len(imgs) > 0:
         data = pd.DataFrame({'Images':imgs})
-    tfms = [AT.ToTensorV2()]
+    tfms = [AT.ToTensor()]
     if norm:
         if img_mean is None:
             norm_tfms = albu.Compose(tfms)
@@ -888,7 +893,7 @@ def imgs_to_batch(paths=[], imgs=[], bs=1, size=None, norm=False, img_mean=None,
 
 # def imgs_to_batch_old(paths = [],imgs = [], size = None, smaller_factor = None, enlarge_factor = None, mean = None, std = None,
 #                   stats_percentage = 1.,show = False, norm = False, bgr_to_rgb = False, device = None, channels = 3):
-#     tfms = [AT.ToTensorV2()]    
+#     tfms = [AT.ToTensor()]    
 #     if len(paths) > 0:
 #         if channels == 3:
 #             bgr_to_rgb = True
@@ -955,12 +960,12 @@ def batch_to_imgs(batch, mean=None, std=None):
     return imgs    
 
 def mini_batch(dataset,bs,start=0):
-    imgs = torch.Tensor(bs,*dataset[0][0].shape)
+    imgs = torch.tensor(bs,*dataset[0][0].shape)
     s = dataset[0][1].shape
     if len(s) > 0:
-        labels = torch.Tensor(bs,*s)
+        labels = torch.tensor(bs,*s)
     else:    
-        labels = torch.Tensor(bs).int()
+        labels = torch.tensor(bs).int()
     for i in range(start,bs+start):
         b = dataset[i]
         imgs[i-start] = b[0]

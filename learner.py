@@ -100,8 +100,14 @@ class CheckpointCallback(Callback):
         return curr_metric
 
     def after_valid(self):
-
         curr_metric = self.get_curr_metric()
+        if self.trial is not None:
+            self.trial.report(curr_metric, self.curr_epoch)
+
+            # Handle pruning based on the intermediate value.
+            if self.trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+        self.learner.curr_metric = curr_metric
         if (self.save_every is not None) and ((self.curr_epoch+1) % self.save_every == 0): 
             checkpoint = self.model.checkpoint_dict()
             checkpoint[self.save_metric] = curr_metric
@@ -138,6 +144,8 @@ class CheckpointCallback(Callback):
                 print(' Early Stopping.')
                 print('+----------------------------------------------------------------------+')
     def after_fit(self):
+        if self.trial is not None:
+            return self.curr_metric
         if self.best_name.exists() and self.load_best:
             checkpoint = torch.load(self.best_name)
             self.learner.checkpoint = checkpoint
@@ -196,7 +204,7 @@ class BasicCallback(Callback):
             acc, class_acc = self.classifier.get_final_accuracies()
             self.learner.val_ret[self.learn_metric] = acc
             if is_list(acc):
-                self.learner.val_ret[f'mean {self.learn_metric}'] = tensor(acc).mean().item()
+                self.learner.val_ret[f'mean {self.learn_metric}'] = torch.as_tensor(acc).mean().item()
                 # print(self.learner.val_ret[f'mean {self.learn_metric}'])
             self.learner.val_ret['class_accuracies'] = class_acc
 
@@ -221,7 +229,7 @@ class BasicCallback(Callback):
 
         elif self.learn_metric == 'multi_accuracy':
             p = nn.Sigmoid()(self.pred_out).cpu()[0]
-            bools = (p >= tensor(self.pred_thresh))
+            bools = (p >= torch.as_tensor(self.pred_thresh))
             # print(bools)
             c = np.array(self.dls.class_names)[bools]
             self.learner.pred_out = {'probs': p, 'bools':bools, 'pred': c}
@@ -450,7 +458,7 @@ class Ensemble():
 
             elif metric == 'multi_accuracy':
                 p = nn.Sigmoid()(pred_out).cpu()[0]
-                bools = (p >= tensor(pred_thresh))
+                bools = (p >= torch.as_tensor(pred_thresh))
                 # print(bools)
                 c = np.array(self.dls.class_names)[bools]
                 pred_out = {'probs': p, 'bools':bools}
@@ -470,10 +478,15 @@ class Ensemble():
         return outputs
 
 class Learner:
-    def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()]):
+    def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()], trial=None):
 
         store_attr(self, 'model,dls,model_splitter,cbs')
         self.learn_metric = metric
+        if metric == 'loss':
+            self.optuna_opt = 'minimize'
+        else:
+            self.optuna_opt = 'maximize'
+        self.trial = trial
         for cb in cbs: cb.learner = self
         try:
             self.model.normalize = dls.normalize
@@ -897,7 +910,7 @@ class Learner:
             acc, class_acc = classifier.get_final_accuracies()
             ret['accuracy'] = acc
             if is_list(acc):
-                ret['mean accuracy'] = tensor(acc).mean().item()
+                ret['mean accuracy'] = torch.as_tensor(acc).mean().item()
             ret['class_accuracies'] = class_acc    
             # ret['accuracy'],ret['class_accuracies'] = classifier.get_final_accuracies()
             try:

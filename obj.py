@@ -134,7 +134,7 @@ def get_obj_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiObjDataset,
                 **kwargs):
     
     if tfms is None:
-        tfms = albu.Compose([AT.ToTensorV2()])
+        tfms = albu.Compose([AT.ToTensor()])
 
     if not is_iterable(tfms):
         tfms = [tfms]

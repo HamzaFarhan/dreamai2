@@ -83,9 +83,9 @@ class DaiDataset(Dataset):
         else:
             meta1,meta2 = self.meta_idx
         try:
-            ret_meta = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+            ret_meta = torch.cat([torch.tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
         except:
-            ret_meta = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+            ret_meta = torch.cat([torch.tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
         return ret_meta
 
     def get_ret(self, **kwargs):
@@ -252,9 +252,9 @@ class MatchingDatasetOld(Dataset):
             else:
                 meta1,meta2 = self.meta_idx
             try:
-                ret['meta'] = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+                ret['meta'] = torch.cat([torch.tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
             except:
-                ret['meta'] = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+                ret['meta'] = torch.cat([torch.tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
 
         return ret
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':self.data.iloc[index, 0]}
@@ -304,9 +304,9 @@ class MatchingDatasetOld(Dataset):
             else:
                 meta1,meta2 = self.meta_idx
             try:
-                ret['meta'] = torch.cat([tensor(m) for m in self.data.iloc[index, meta1:meta2]])
+                ret['meta'] = torch.cat([torch.tensor(m) for m in self.data.iloc[index, meta1:meta2]])
             except:
-                ret['meta'] = torch.cat([tensor([m]) for m in self.data.iloc[index, meta1:meta2]])
+                ret['meta'] = torch.cat([torch.tensor([m]) for m in self.data.iloc[index, meta1:meta2]])
         return ret
         # return {'x':x, 'label':y, 'ss_img':img2, 'x2':x2, 'path':p}
 
@@ -848,9 +848,9 @@ class PredDataset(Dataset):
             else:
                 meta1,meta2 = self.meta_idx
             try:
-                ret['meta'] = torch.cat([tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+                ret['meta'] = torch.cat([torch.tensor(m).float() for m in self.data.iloc[index, meta1:meta2]]).float()
             except:
-                ret['meta'] = torch.cat([tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
+                ret['meta'] = torch.cat([torch.tensor([m]).float() for m in self.data.iloc[index, meta1:meta2]]).float()
         return ret
 
     def __len__(self): return len(self.data)
@@ -1395,7 +1395,7 @@ def get_class_weights(df):
         w = [(x/total) for x in counts]
     except:
         w = list(df.iloc[:,1].value_counts(normalize=True).sort_index())    
-    return 1-tensor(w)
+    return 1-torch.tensor(w)
 
 def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32, device=None,
                    img_idx=0, label_idx=1):
@@ -1425,7 +1425,7 @@ def get_data_stats(df, data_dir='', image_size=224, stats_percentage=0.7, bs=32,
             images = data_batch['x'].to(device)
         batch_samples = images.size(0) 
         images = images.view(batch_samples, images.size(1), -1)
-        mean += images.mean(2).sum(0)
+        mean += images.to(dtype=torch.float32).mean(2).sum(0)
     mean = mean / len(dl.dataset)
     # print('.', end='')
     var = 0.0
@@ -1560,9 +1560,9 @@ class dai_image_csv_dataset_landmarks(Dataset):
             img = img.convert('L')
         y1,y2 = self.data.iloc[index, 1],self.data.iloc[index, 2]
         try:
-            y2 = torch.Tensor(literal_eval(y2))
+            y2 = torch.tensor(literal_eval(y2))
         except:
-            y2 = torch.Tensor(y2)
+            y2 = torch.tensor(y2)
         self.tfms = transforms.Compose(self.transforms_)    
         x = self.tfms(img)
         s = x.shape[1]
@@ -1575,7 +1575,7 @@ class dai_image_csv_dataset_landmarks(Dataset):
 
 
 def rescale_landmarks(landmarks,row_scale,col_scale):
-    landmarks2 = copy.deepcopy(torch.Tensor(landmarks).reshape((-1,2)))
+    landmarks2 = copy.deepcopy(torch.tensor(landmarks).reshape((-1,2)))
     for lm in landmarks2:
         c,r = lm
         lm[0] = c*col_scale

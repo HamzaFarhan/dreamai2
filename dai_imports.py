@@ -71,6 +71,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from collections import defaultdict
 from argparse import ArgumentParser
+from optuna.trial import TrialState
 from skimage.util import img_as_ubyte
 from skimage.util import img_as_float
 from itertools import product as product

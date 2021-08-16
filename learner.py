@@ -144,9 +144,8 @@ class CheckpointCallback(Callback):
                 print(' Early Stopping.')
                 print('+----------------------------------------------------------------------+')
     def after_fit(self):
-        if self.trial is not None:
-            return self.curr_metric
-        if self.best_name.exists() and self.load_best:
+        self.learner.curr_metric = self.curr_metric
+        if self.best_name.exists() and self.load_best and self.trial is None:
             checkpoint = torch.load(self.best_name)
             self.learner.checkpoint = checkpoint
             self.model.load_checkpoint(checkpoint)
@@ -722,6 +721,8 @@ class Learner:
                 do_fit()
         else:
             do_fit()
+        if self.trial is not None:
+            return self.curr_metric
 
     def predict(self, x, pred_dset=PredDataset, pred_thresh=None, device=None, meta_dix=None,
                 do_tta=False, tta=None, num_tta=3, **kwargs):

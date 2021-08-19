@@ -1352,40 +1352,22 @@ class DataLoaders():
                 new_dls.append(new_dl(getattr(self, f'{dtype}_dl'), bs=bs))
         self.assign_dls(*new_dls)
 
-    # def progressive_resize(self, h=224, w=224, bs=32):
-    #     new_train_dl, new_valid_dl, new_test_dl = None, None, None
-
-    #     if self.train:
-    #         # set_resize_dims(self.train_ds.tfms, h=h, w=w)
-    #         # if self.train_ds.ss_tfms is not None:
-    #         if len(self.train_ds.tfms_list) > 0:
-    #             for t in self.train_ds.tfms_list:
-    #                 # set_resize_dims(self.train_ds.ss_tfms, h=h, w=w)
-    #                 set_resize_dims(t, h=h, w=w)
-    #         new_train_dl = new_dl(self.train_dl, bs=bs)
-    #     if self.valid:
-    #         set_resize_dims(self.valid_ds.tfms, h=h, w=w)
-    #         if self.valid_ds.ss_tfms is not None:
-    #             set_resize_dims(self.valid_ds.ss_tfms, h=h, w=w)
-    #         new_valid_dl = new_dl(self.valid_dl, bs=bs)
-    #     if self.test:
-    #         set_resize_dims(self.test_ds.tfms, h=h, w=w)
-    #         if self.test_ds.ss_tfms is not None:
-    #             set_resize_dims(self.test_ds.ss_tfms, h=h, w=w)
-    #         new_test_dl = new_dl(self.test_dl, bs=bs)
-
-    #     self.assign_dls(new_train_dl, new_valid_dl, new_test_dl)
-
     def __len__(self):
         return sum([(self.train!=None) + (self.valid!=None) + (self.test!=None)])
 
-def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_fn=None):
-    dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle, collate_fn=collate_fn,
-                      num_workers=num_workers, pin_memory=pin_memory) for dset in dsets]
-    # for dl in dls:
-        # dl.suggested_metric = 'loss'
-        # dl.suggested_crit = None
+def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_fn=None, ddp=None):
+    dls = []
+    for dset in dsets:
+        if ddp is not None:
+            sampler = ddp(dset)
+            dls.append(DataLoader(dset, batch_size=bs, shuffle=False, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory, sampler=sampler))
+        else:
+            dls.append(DataLoader(dset, batch_size=bs, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory))
     return dls
+
+# def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_fn=None):
+#     dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory) for dset in dsets]
+#     return dls
 
 def get_class_weights(df):
     df = df.copy()

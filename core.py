@@ -89,11 +89,11 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
     "Model head that takes `nf` features, runs through `lin_ftrs`, and out `n_out` classes."
     if trial is not None:
         lin_ftrs = [nf]
-        # num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 1, 3)
-        num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 3, 5)
+        num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 1, 3)
+        # num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 3, 5)
         for i in range(num_lin_ftrs):
-            # n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", [256,512,1024])
-            n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", [1024,1224,1424,1624,1824,2000])
+            n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", [256,512,1024])
+            # n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", [1024,1224,1424,1624,1824,2000])
             lin_ftrs.append(n_lin_ftrs)
         lin_ftrs.append(n_out)
     elif num_lin_ftrs is not None and n_lin_ftrs is not None:

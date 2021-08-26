@@ -616,6 +616,7 @@ class Learner:
             self.train_batch()
             if self.print_progress:
                 self.print_train_progress()
+        del self.data_batch
         self('after_train_epoch')
     
     def val_epoch(self):
@@ -627,6 +628,7 @@ class Learner:
             for self.batch_num, self.data_batch in enumerate(dl):
             # for self.batch_num, self.data_batch in zip(range(self.num_batches),dl):
                 self.val_batch()
+                del self.data_batch
         self('after_val_epoch')
         if self.print_progress:
             self.print_valid_progress()

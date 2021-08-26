@@ -38,6 +38,19 @@ models_meta = {resnet34: {'cut': -2, 'conv_channels': 512},
 DEFAULTS = {'models_meta': models_meta, 'metrics': ['loss', 'accuracy', 'multi_accuracy'],
             'imagenet_stats': imagenet_stats, 'image_extensions': image_extensions}
 
+class DaiDataParallel(nn.parallel.DistributedDataParallel):
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
+        
+    def __setattr__(self, name, value):
+        try:
+            return super().__setattr__(name, value)
+        except AttributeError:
+            return setattr(self.module, name, value)
+
 class BodyModel(nn.Module):
     def __init__(self, model):
         super().__init__()

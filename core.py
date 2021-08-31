@@ -98,14 +98,16 @@ class MultiHeadModel(nn.Module):
 
 def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
                 bn_final=False, lin_first=False, y_range=None, actv=None,
-                relu_fn=nn.ReLU(inplace=True), trial=None, num_lin_ftrs=None, n_lin_ftrs=None):
+                relu_fn=nn.ReLU(inplace=True), trial=None, num_lin_ftrs=None, n_lin_ftrs=None, trial_num_lin_ftrs=[1,3],
+                trial_n_lin_ftrs=[256,512,1024]):
     "Model head that takes `nf` features, runs through `lin_ftrs`, and out `n_out` classes."
     if trial is not None:
         lin_ftrs = [nf]
-        num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 1, 3)
-        # num_lin_ftrs = trial.suggest_int("num_lin_ftrs", 3, 5)
+        num_lin_ftrs = trial.suggest_int("num_lin_ftrs",
+                                         trial_num_lin_ftrs[0],
+                                         trial_num_lin_ftrs[1])
         for i in range(num_lin_ftrs):
-            n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", [256,512,1024])
+            n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", trial_n_lin_ftrs)
             # n_lin_ftrs = trial.suggest_categorical(f"n_lin_ftrs_{i}", [1024,1224,1424,1624,1824,2000])
             lin_ftrs.append(n_lin_ftrs)
         lin_ftrs.append(n_out)
@@ -134,7 +136,7 @@ def create_head(nf, n_out, lin_ftrs=None, ps=0.5, concat_pool=True,
 
 def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
                  relu_fn=nn.ReLU(inplace=True), actv=None, pretrained=True,
-                 only_body=False, state_dict=None, strict_load=True, trial=None, num_lin_ftrs=None, n_lin_ftrs=None):
+                 only_body=False, state_dict=None, strict_load=True, trial=None, num_lin_ftrs=None, n_lin_ftrs=None, trial_num_lin_ftrs=[1,3], trial_n_lin_ftrs=[256,512,1024]):
     meta = models_meta[arch]
     body = create_body(arch, pretrained=pretrained, cut=meta['cut'], num_extra=num_extra)
     if only_body:
@@ -142,10 +144,10 @@ def create_model(arch, num_classes, num_extra=3, meta_len=0, body_out_mult=1,
     if is_iterable(num_classes):
         heads = []
         for nc in num_classes:
-            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc, relu_fn=relu_fn, actv=actv, trial=trial, num_lin_ftrs=num_lin_ftrs, n_lin_ftrs=n_lin_ftrs)) 
+            heads.append(create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=nc, relu_fn=relu_fn, actv=actv, trial=trial, num_lin_ftrs=num_lin_ftrs, n_lin_ftrs=n_lin_ftrs, trial_num_lin_ftrs=trial_num_lin_ftrs, trial_n_lin_ftrs=trial_n_lin_ftrs)) 
         head = MultiHeadModel(nn.ModuleList(heads))
     else:
-        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes, relu_fn=relu_fn, actv=actv, trial=trial, num_lin_ftrs=num_lin_ftrs, n_lin_ftrs=n_lin_ftrs)
+        head = create_head(nf=((meta['conv_channels']*2)*body_out_mult)+meta_len, n_out=num_classes, relu_fn=relu_fn, actv=actv, trial=trial, num_lin_ftrs=num_lin_ftrs, n_lin_ftrs=n_lin_ftrs, trial_num_lin_ftrs=trial_num_lin_ftrs, trial_n_lin_ftrs=trial_n_lin_ftrs)
     net = nn.Sequential(body, head)
     load_state_dict(net, sd=state_dict, strict=strict_load)
     return net

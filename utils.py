@@ -88,8 +88,11 @@ def denorm_img_(x, mean=None, std=None):
         mean = np.mean(x)
     if std is None:    
         std = np.std(x)
-    mean = mean.numpy()
-    std = std.numpy()
+    try:
+        mean = mean.numpy()
+        std = std.numpy()
+    except:
+        pass
     x = std * x + mean
     x =  img_float_to_int(x)
     # x = np.clip(x, 0., 1.)

@@ -35,8 +35,7 @@ import shutil
 import pickle
 import random
 import optuna
-# import nmslib
-# import pilgram
+import adaptdl
 import inspect
 # import skimage
 import logging
@@ -52,6 +51,8 @@ import pandas as pd
 from math import sqrt
 from scipy import stats
 from pathlib import Path
+# import horovod.torch as hvd
+import adaptdl.torch as adt
 from functools import wraps
 from ast import literal_eval
 from functools import partial

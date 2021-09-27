@@ -433,6 +433,11 @@ def split_array(start, stop, steps, step=1):
     # print(chunks)
     return [list(x)[-1] for x in chunks]
 
+def get_reduced_metric(metric, dest_device):
+    metric_tensor = metric.clone()
+    torch.distributed.reduce(metric_tensor, dst=dest_device)
+    return metric_tensor
+
 def checkpoint_to_model(checkpoint, only_body=False, only_head=False, swap_x='', swap_y=''):
     if checkpoint is None: return None
     model_sd = copy.deepcopy(checkpoint)

@@ -101,48 +101,49 @@ class CheckpointCallback(Callback):
 
     def after_valid(self):
         curr_metric = self.get_curr_metric()
-        if self.trial is not None:
-            self.trial.report(curr_metric, self.curr_epoch)
+        if self.rank is not None and self.rank == 0:
+            curr_metric = get_reduced_metric(curr_metric.detach(), 0)
+            if self.trial is not None:
+                self.trial.report(curr_metric, self.curr_epoch)
+                # Handle pruning based on the intermediate value.
+                if self.trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+            self.learner.curr_metric = curr_metric
+            if (self.save_every is not None) and ((self.curr_epoch+1) % self.save_every == 0): 
+                checkpoint = self.model.checkpoint_dict()
+                checkpoint[self.save_metric] = curr_metric
+                if 'accuracy' in self.save_metric:
+                    checkpoint['class_names'] = self.dls.class_names
+                torch.save(checkpoint, self.save_name.parent/(self.save_name.stem+f'_{curr_metric}'+self.save_name.suffix))
 
-            # Handle pruning based on the intermediate value.
-            if self.trial.should_prune():
-                raise optuna.exceptions.TrialPruned()
-        self.learner.curr_metric = curr_metric
-        if (self.save_every is not None) and ((self.curr_epoch+1) % self.save_every == 0): 
-            checkpoint = self.model.checkpoint_dict()
-            checkpoint[self.save_metric] = curr_metric
-            if 'accuracy' in self.save_metric:
-                checkpoint['class_names'] = self.dls.class_names
-            torch.save(checkpoint, self.save_name.parent/(self.save_name.stem+f'_{curr_metric}'+self.save_name.suffix))
+            if self.checker(curr_metric, self.curr_best, self.save_metric) and self.save_best:
+                self.not_improved = 0
+                if self.print_progress:
+                    top = f'\n**********Updating best {self.save_metric}**********\n'
+                    print(top)
+                    print(f'Previous best: {self.curr_best:.5f}')
+                    print(f'New best: {curr_metric:.5f}\n')
+                    bottom = '*'*(len(top)-2)
+                    print(f'{bottom}\n')
+                    if self.send_text:
+                        msg = f'{top}\n\nPrevious best: {self.curr_best:.5f}\nNew best: {curr_metric:.5f}\n\n{bottom}'
+                        pushbullet_message(msg)
+                self.curr_best = curr_metric
+                checkpoint = self.model.checkpoint_dict()
+                checkpoint[self.save_metric] = self.curr_best
+                if 'accuracy' in self.save_metric:
+                    checkpoint['class_names'] = self.dls.class_names
+                # torch.save(checkpoint, self.best_name.parent/(self.best_name.stem+f'_{curr_metric}'+self.best_name.suffix))
+                torch.save(checkpoint, self.best_name)
 
-        if self.checker(curr_metric, self.curr_best, self.save_metric) and self.save_best:
-            self.not_improved = 0
-            if self.print_progress:
-                top = f'\n**********Updating best {self.save_metric}**********\n'
-                print(top)
-                print(f'Previous best: {self.curr_best:.5f}')
-                print(f'New best: {curr_metric:.5f}\n')
-                bottom = '*'*(len(top)-2)
-                print(f'{bottom}\n')
-                if self.send_text:
-                    msg = f'{top}\n\nPrevious best: {self.curr_best:.5f}\nNew best: {curr_metric:.5f}\n\n{bottom}'
-                    pushbullet_message(msg)
-            self.curr_best = curr_metric
-            checkpoint = self.model.checkpoint_dict()
-            checkpoint[self.save_metric] = self.curr_best
-            if 'accuracy' in self.save_metric:
-                checkpoint['class_names'] = self.dls.class_names
-            # torch.save(checkpoint, self.best_name.parent/(self.best_name.stem+f'_{curr_metric}'+self.best_name.suffix))
-            torch.save(checkpoint, self.best_name)
-
-        elif self.early_stopping_epochs is not None:
-            self.not_improved += 1
-            if self.not_improved >= self.early_stopping_epochs:
-                self.learner.do_training = False
-                self.learner.load_best = True
-                print('+----------------------------------------------------------------------+')
-                print(' Early Stopping.')
-                print('+----------------------------------------------------------------------+')
+            elif self.early_stopping_epochs is not None:
+                self.not_improved += 1
+                if self.not_improved >= self.early_stopping_epochs:
+                    self.learner.do_training = False
+                    self.learner.load_best = True
+                    print('+----------------------------------------------------------------------+')
+                    print(' Early Stopping.')
+                    print('+----------------------------------------------------------------------+')
     def after_fit(self):
         self.learner.curr_metric = self.curr_metric
         if self.best_name.exists() and self.load_best and self.trial is None:
@@ -477,15 +478,14 @@ class Ensemble():
         return outputs
 
 class Learner:
-    def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()], trial=None):
+    def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()], trial=None, rank=None):
 
-        store_attr(self, 'model,dls,model_splitter,cbs')
+        store_attr(self, 'model,dls,model_splitter,cbs,trial,rank')
         self.learn_metric = metric
         if metric == 'loss':
             self.optuna_opt = 'minimize'
         else:
             self.optuna_opt = 'maximize'
-        self.trial = trial
         for cb in cbs: cb.learner = self
         try:
             self.model.normalize = dls.normalize

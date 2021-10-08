@@ -952,6 +952,8 @@ def to_batch(paths=[], imgs=[], size=None, channels=3):
             elif channels==1:
                 img = cv2.imread(p,0)
             if size is not None:
+                if not list_or_tuple(size):
+                    size = (size, size)
                 img = cv2.resize(img, size)
             imgs.append(img)
     if not is_list(imgs):

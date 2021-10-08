@@ -1063,6 +1063,50 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
 
     return dls
 
+def get_regression_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
+                       tfms=instant_tfms(224, 224), bs=64, shuffle=True,
+                       pin_memory=True, num_workers=4, meta_idx=None,
+                       split=True, val_size=0.2, test_size=0.15, **kwargs):
+
+    if not is_iterable(tfms):
+        tfms = [tfms]
+    if len(df.columns) == 1:
+        df['extra_col'] = 'extra'
+    labels = list(df.iloc[:,1])
+    stratify_idx = 1
+    dfs = [df]
+    transforms_ = [tfms[0]]
+    if split:
+        if val_df is None:
+            dfs = list(split_df(df, val_size, stratify_idx=stratify_idx))
+            transforms_ = [tfms[0], tfms[1]]
+        elif val_df is not None:
+            dfs+=[val_df]
+            transforms_ = [tfms[0], tfms[1]]
+        if (test_size > 0) and (test_df is None):
+            val_df, test_df = split_df(dfs[1], test_size, stratify_idx=stratify_idx)
+            dfs = [dfs[0], val_df, test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+        elif test_df is not None:
+            dfs+=[test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+    else:
+        if val_df is not None:
+            dfs+=[val_df]
+            transforms_ = [tfms[0], tfms[1]]
+        if test_df is not None:
+            dfs+=[test_df]
+            transforms_ = [tfms[0], tfms[1], tfms[1]]
+    dsets = [dset(data_dir=data_dir, data=df, tfms=tfms_, meta_idx=meta_idx, **kwargs) for df,tfms_ in zip(dfs, transforms_)]
+    dls = get_dls(dsets=[dsets[0]], bs=bs, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+    if split:
+        dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
+    dls = DataLoaders(*dls)
+    dls.data_type = 'regression'
+    dls.suggested_crit = nn.MSELoss()
+    dls.suggested_metric = 'loss'
+    return dls
+
 def get_matching_dls_old(df, val_df=None, test_df=None, data_dir='', dset=MatchingDataset,
                        tfms=instant_tfms(224, 224), bs=64, shuffle=True,
                        pin_memory=True, num_workers=4, meta_idx=None,

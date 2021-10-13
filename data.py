@@ -972,7 +972,7 @@ class dai_classifier_dataset(Dataset):
 
 def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
                        tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
-                       pin_memory=True, num_workers=4, force_one_hot=False, meta_idx=None,
+                       pin_memory=False, num_workers=4, force_one_hot=False, meta_idx=None,
                        class_names=None, split=True, val_size=0.2, test_size=0.15,
                        tta=None, num_tta=3, multi_delim=' ', **kwargs):
 
@@ -1065,8 +1065,8 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
 
 def get_regression_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDataset,
                        tfms=instant_tfms(224, 224), bs=64, shuffle=True,
-                       pin_memory=True, num_workers=4, meta_idx=None,
-                       split=True, val_size=0.2, test_size=0.15, **kwargs):
+                       pin_memory=False, num_workers=4, meta_idx=None,
+                       split=True, val_size=0.2, test_size=0.15, crit=None, **kwargs):
 
     if not is_iterable(tfms):
         tfms = [tfms]
@@ -1103,13 +1103,16 @@ def get_regression_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
         dls += get_dls(dsets=dsets[1:], bs=bs, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
     dls = DataLoaders(*dls)
     dls.data_type = 'regression'
-    dls.suggested_crit = nn.MSELoss()
+    if crit is None:
+        dls.suggested_crit = nn.MSELoss()
+    else:
+        dls.suggested_crit = crit
     dls.suggested_metric = 'loss'
     return dls
 
 def get_matching_dls_old(df, val_df=None, test_df=None, data_dir='', dset=MatchingDataset,
                        tfms=instant_tfms(224, 224), bs=64, shuffle=True,
-                       pin_memory=True, num_workers=4, meta_idx=None,
+                       pin_memory=False, num_workers=4, meta_idx=None,
                        class_names=None, split=True, val_size=0.2, test_size=0.15,
                        tta=None, num_tta=3, **kwargs):
 
@@ -1162,7 +1165,7 @@ def get_matching_dls_old(df, val_df=None, test_df=None, data_dir='', dset=Matchi
 
 def get_similarity_dls(df, val_df=None, test_df=None, data_dir='', dset=SimilarityDataset,
                        tfms=instant_tfms(224, 224), tfms2=None, bs=64, shuffle=True, same_img=False,
-                       pin_memory=True, num_workers=4, force_one_hot=False, shuffle_data2=True,
+                       pin_memory=False, num_workers=4, force_one_hot=False, shuffle_data2=True,
                        class_names=None, split=True, val_size=0.2, test_size=0.15, **kwargs):
 
     def df_one_hot(df):
@@ -1240,7 +1243,7 @@ def get_similarity_dls(df, val_df=None, test_df=None, data_dir='', dset=Similari
 
 def get_matching_dls(df, val_df=None, test_df=None, data_dir='', dset=MatchingDataset,
                        tfms=instant_tfms(224, 224), tfms2=None, bs=64, shuffle=True, same_img=False,
-                       pin_memory=True, num_workers=4, force_one_hot=False, shuffle_data2=True,
+                       pin_memory=False, num_workers=4, force_one_hot=False, shuffle_data2=True,
                        class_names=None, split=True, val_size=0.2, test_size=0.15, **kwargs):
     def df_one_hot(df):
         df = df.copy()
@@ -1399,7 +1402,7 @@ class DataLoaders():
     def __len__(self):
         return sum([(self.train!=None) + (self.valid!=None) + (self.test!=None)])
 
-def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_fn=None, ddp=None):
+def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=False, collate_fn=None, ddp=None):
     dls = []
     for dset in dsets:
         if ddp is not None:
@@ -1409,7 +1412,7 @@ def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_
             dls.append(DataLoader(dset, batch_size=bs, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory))
     return dls
 
-# def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=True, collate_fn=None):
+# def get_dls(dsets, bs=32, shuffle=True, num_workers=4, pin_memory=False, collate_fn=None):
 #     dls = [DataLoader(dset, batch_size=bs, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory) for dset in dsets]
 #     return dls
 

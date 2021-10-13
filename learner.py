@@ -101,8 +101,10 @@ class CheckpointCallback(Callback):
 
     def after_valid(self):
         curr_metric = self.get_curr_metric()
-        if self.rank is not None and self.rank == 0:
-            curr_metric = get_reduced_metric(curr_metric.detach(), 0)
+        if (self.rank is not None and self.rank == 0) or self.rank is None:
+            try:
+                curr_metric = get_reduced_metric(curr_metric.detach(), 0)
+            except: pass
             if self.trial is not None:
                 self.trial.report(curr_metric, self.curr_epoch)
                 # Handle pruning based on the intermediate value.
@@ -481,6 +483,9 @@ class Learner:
     def __init__(self, model, dls, model_splitter=None, metric='loss', cbs=[BasicCallback()], trial=None, rank=None):
 
         store_attr(self, 'model,dls,model_splitter,cbs,trial,rank')
+        self.data_type = None
+        if hasattr(dls, 'data_type'):
+            self.data_type = dls.data_type
         self.learn_metric = metric
         if metric == 'loss':
             self.optuna_opt = 'minimize'
@@ -592,7 +597,7 @@ class Learner:
         else:
             self.tr_batch_loss, self.tr_batch_out = self.model.batch_to_loss(self.data_batch,
                                                                class_weights=self.class_weights[0],
-                                                               extra_loss_func=self.extra_loss_func)
+                                                               extra_loss_func=self.extra_loss_func, data_type=self.data_type)
         if self.fit_scheduler is not None:
             self.fit_scheduler.step()
             # print(get_lr(self.model.optimizer))
@@ -603,7 +608,7 @@ class Learner:
         self.val_batch_loss, self.val_batch_out = self.model.val_batch_to_loss(self.data_batch, metric=self.learn_metric,
                                                   classifier=self.classifier, thresh=self.pred_thresh,
                                                   class_weights=self.class_weights[-1],
-                                                  extra_loss_func=self.extra_loss_func)
+                                                  extra_loss_func=self.extra_loss_func, data_type=self.data_type)
         self('after_val_batch')
     
     def train_epoch(self):

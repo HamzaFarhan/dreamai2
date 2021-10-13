@@ -474,6 +474,8 @@ class DaiModel(nn.Module):
                     loss = self.criterion(outputs, labels)
                     setattr(self.criterion, 'weight', w)
                     return loss
+            if self.data_type == 'regression':
+                labels = labels.unsqueeze(1)
             return self.criterion(outputs, labels)
         
         if is_list(outputs):
@@ -521,9 +523,14 @@ class DaiModel(nn.Module):
         #     meta = data_batch['meta'].to(device)
 
         outputs = self.forward(inputs, meta=meta)
+        if labels.type != outputs.type():
+            # print('lala')
+            labels = labels.type(outputs.type())
+            # print(labels.type(), outputs.type())
         return outputs, labels
 
-    def batch_to_loss(self, data_batch, backward_step=True, class_weights=None, extra_loss_func=None, device=None, **kwargs):
+    def batch_to_loss(self, data_batch, backward_step=True, class_weights=None, extra_loss_func=None, device=None, data_type=None, **kwargs):
+        self.data_type = data_type
         if device is None:
             device = self.device
         # inputs,labels = data_batch['x'], data_batch['label']
@@ -593,7 +600,8 @@ class DaiModel(nn.Module):
         elif metric == 'multi_accuracy':
             classifier.update_multi_accuracies(outputs, labels, thresh)
 
-    def val_batch_to_loss(self, data_batch, metric='loss', thresh=None, class_weights=None, extra_loss_func=None, **kwargs):
+    def val_batch_to_loss(self, data_batch, metric='loss', thresh=None, class_weights=None, extra_loss_func=None, data_type=None, **kwargs):
+        self.data_type = data_type
         ret = {}
         # inputs,labels = data_batch['x'], data_batch['label']
         # inputs = inputs.to(self.device)

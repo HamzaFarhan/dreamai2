@@ -57,7 +57,7 @@ class BodyModel(nn.Module):
         self.model = model
 
     def forward(self, x):
-        if isinstance(self.model, EfficientNet):
+        if isinstance(self.model, EfficientNet): # TODO : Implement more
             return self.model.extract_features(x)
         return self.model(x)
 

@@ -947,6 +947,7 @@ def to_batch(paths=[], imgs=[], size=None, channels=3):
             paths = [paths]
         imgs = []
         for p in paths:
+            p = str(p)
             if channels==3:
                 img = bgr2rgb(cv2.imread(p))
             elif channels==1:

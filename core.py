@@ -523,10 +523,13 @@ class DaiModel(nn.Module):
         #     meta = data_batch['meta'].to(device)
 
         outputs = self.forward(inputs, meta=meta)
-        if labels.type != outputs.type():
-            # print('lala')
-            labels = labels.type(outputs.type())
-            # print(labels.type(), outputs.type())
+        try:
+            if labels.type != outputs.type():
+                # print('lala')
+                labels = labels.type(outputs.type())
+                # print(labels.type(), outputs.type())
+        except:
+            pass
         return outputs, labels
 
     def batch_to_loss(self, data_batch, backward_step=True, class_weights=None, extra_loss_func=None, device=None, data_type=None, **kwargs):

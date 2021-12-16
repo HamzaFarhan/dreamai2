@@ -424,6 +424,21 @@ def remove_key(d, fn):
         if fn(k):
             del d[k]
 
+def fn_param_defined(fn, param='x'):
+    '''Find out if a param's value is defined in a function.
+
+    Args:
+        fn (function): The function.
+        param (str, optional): The name of the param. Defaults to 'x'.
+    '''
+    spec = inspect.signature(fn)
+    fn_params = dict_values(spec.parameters)
+    for p in fn_params:
+        p = str(p)
+        if '=' in p and p.split('=')[0] == param:
+            return True
+    return False
+
 def split_array(start, stop, steps, step=1):
     if start == stop:
         return [start]*steps
@@ -1565,7 +1580,7 @@ def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=None,
     if only_dirs:
         l = [x for x in l if x.is_dir()]
     if key is None:
-        l = sorted(l, key=last_modified, reverse=True)
+        l = sorted(l, key=path_name, reverse=False)
     else:
         l = sorted(l, key=key, reverse=reverse)
     if map_fn is not None:

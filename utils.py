@@ -152,10 +152,28 @@ def img_int_to_float(img):
 def rgb_read(img, shape=None):
     if not path_or_str(img):
         return img
+    if 'dng' in Path(img).suffix:
+        print('got dng')
+        raw = rawpy.imread(img)
+        img = str(Path(img).with_suffix('.jpg'))
+        if not os.path.exists(img):
+            try:
+                plt.imsave(img, raw.postprocess(use_camera_wb=True))
+            except:
+                plt.imsave(img, raw.postprocess())
+        raw.close()
     img = bgr2rgb(cv2.imread(str(img)))
     if shape is not None:
         img = cv2.resize(img, (shape[1], shape[0]))
     return img
+
+# def rgb_read(img, shape=None):
+#     if not path_or_str(img):
+#         return img
+#     img = bgr2rgb(cv2.imread(str(img)))
+#     if shape is not None:
+#         img = cv2.resize(img, (shape[1], shape[0]))
+#     return img
 
 def c1_read(img):
     return cv2.imread(str(img), 0)

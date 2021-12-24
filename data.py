@@ -974,7 +974,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
                        tfms=instant_tfms(224, 224), ss_tfms=None, bs=64, shuffle=True,
                        pin_memory=False, num_workers=4, force_one_hot=False, meta_idx=None,
                        class_names=None, split=True, val_size=0.2, test_size=0.15,
-                       tta=None, num_tta=3, multi_delim=' ', **kwargs):
+                       tta=None, num_tta=3, multi_delim=' ', stratify_idx=1, labels_id=1, **kwargs):
 
     if tta is not None and not list_or_tuple(tta):
         tta = [tta]*num_tta
@@ -983,7 +983,7 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
     def df_one_hot(df):
         df = df.copy()
         # labels = list(df.iloc[:,1].apply(lambda x: str(x).split()))
-        labels = list_map(df.iloc[:,1], lambda x:str(x).split(multi_delim))
+        labels = list_map(df.iloc[:,labels_id], lambda x:str(x).split(multi_delim))
         one_hot_labels = dai_one_hot(labels, class_names)
         df['one_hot'] = list(one_hot_labels)
         cols = df.columns.to_list()
@@ -991,14 +991,13 @@ def get_classifier_dls(df, val_df=None, test_df=None, data_dir='', dset=DaiDatas
         return df
     if len(df.columns) == 1:
         df['extra_col'] = 'extra'
-    labels = list(df.iloc[:,1].apply(lambda x: str(x).split(multi_delim)))
+    labels = list(df.iloc[:,labels_id].apply(lambda x: str(x).split(multi_delim)))
     # labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     # is_multi = np.array(pd.Series(labels).apply(lambda x:len(x)>1)).any()
     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
     if class_names is None:
         class_names = np.unique(flatten_list(labels))
     class_names = list_map(class_names, str)
-    stratify_idx = 1
     # ss_transforms = [ss_tfms[0]]
     if is_multi or force_one_hot:
         # one_hot_labels = dai_one_hot(labels, class_names)    

@@ -476,6 +476,7 @@ class DaiModel(nn.Module):
                     return loss
             if self.data_type == 'regression':
                 labels = labels.unsqueeze(1)
+            print(outputs, labels)
             return self.criterion(outputs, labels)
         
         if is_list(outputs):

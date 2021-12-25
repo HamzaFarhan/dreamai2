@@ -478,7 +478,7 @@ class DaiModel(nn.Module):
                 labels = torch.tensor(labels, dtype=torch.long)
             if self.data_type == 'regression':
                 labels = labels.unsqueeze(1)
-            print(outputs, labels)
+            # print(outputs, labels)
             return self.criterion(outputs, labels)
         
         if is_list(outputs):

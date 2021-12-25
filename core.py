@@ -474,6 +474,8 @@ class DaiModel(nn.Module):
                     loss = self.criterion(outputs, labels)
                     setattr(self.criterion, 'weight', w)
                     return loss
+            if is_cross_entropy(self.criterion):
+                labels = torch.tensor(labels, dtype=torch.long)
             if self.data_type == 'regression':
                 labels = labels.unsqueeze(1)
             print(outputs, labels)

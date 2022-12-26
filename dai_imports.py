@@ -14,9 +14,9 @@ from torch.utils.data import DataLoader
 from torchvision.utils import make_grid
 from torchvision.datasets.folder import*
 import torchvision.transforms.functional as TF
-from torch.utils.data.sampler import RandomSampler
 from torchvision import datasets, models, transforms
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torch.utils.data.sampler import RandomSampler, SubsetRandomSampler
 from torchvision.models.detection import fasterrcnn_resnet50_fpn, mask_rcnn
 from torchvision.models.segmentation import deeplabv3_resnet50,deeplabv3_resnet101
 from torchvision.models import (vgg16,vgg16_bn,densenet121,densenet169,resnet18,resnet34,resnet50,resnet101,resnet152,
@@ -36,7 +36,7 @@ import shutil
 import pickle
 import random
 import optuna
-import adaptdl
+# import adaptdl
 import inspect
 # import skimage
 import logging
@@ -53,7 +53,7 @@ from math import sqrt
 from scipy import stats
 from pathlib import Path
 # import horovod.torch as hvd
-import adaptdl.torch as adt
+# import adaptdl.torch as adt
 from functools import wraps
 from ast import literal_eval
 from functools import partial
@@ -65,7 +65,7 @@ import moviepy.editor as editor
 from collections import Counter
 import matplotlib.pyplot as plt
 from pprint import PrettyPrinter
-from torchsummary import summary
+from torchinfo import summary
 from os.path import isfile, join
 # from sklearn.cluster import KMeans
 import xml.etree.ElementTree as ET
